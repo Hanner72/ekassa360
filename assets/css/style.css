@@ -1,0 +1,533 @@
+/* ============================================
+   EKassa360 - Stylesheet
+   Design: Blautöne, keine Eckenrundungen
+   ============================================ */
+
+/* Farben */
+:root {
+    --ek-primary: #1e3c72;
+    --ek-primary-light: #2a5298;
+    --ek-primary-dark: #152a50;
+    --ek-accent: #4a90d9;
+    --ek-gradient: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+}
+
+/* ============================================
+   GLOBALE RESETS - Keine Eckenrundungen
+   ============================================ */
+.card,
+.btn,
+.form-control,
+.form-select,
+.input-group-text,
+.alert,
+.badge,
+.modal-content,
+.dropdown-menu,
+.nav-tabs .nav-link,
+.nav-pills .nav-link,
+.toast,
+.tooltip-inner,
+.popover,
+.pagination .page-link,
+.list-group-item,
+.accordion-item,
+.accordion-button,
+.progress,
+.progress-bar {
+    border-radius: 0 !important;
+}
+
+.rounded,
+.rounded-circle,
+.rounded-pill,
+.rounded-1,
+.rounded-2,
+.rounded-3 {
+    border-radius: 0 !important;
+}
+
+/* ============================================
+   CARDS
+   ============================================ */
+.card {
+    border: none;
+    box-shadow: 0 2px 8px rgba(30, 60, 114, 0.15);
+}
+
+.card-header {
+    background: var(--ek-gradient);
+    color: #fff;
+    font-weight: 600;
+    border-bottom: none;
+    padding: 0.875rem 1.25rem;
+}
+
+.card-header.bg-primary,
+.card-header.bg-success,
+.card-header.bg-danger,
+.card-header.bg-warning,
+.card-header.bg-info,
+.card-header.bg-secondary {
+    background: var(--ek-gradient) !important;
+}
+
+.card-header h5,
+.card-header h6,
+.card-header .h5,
+.card-header .h6 {
+    color: #fff;
+    margin: 0;
+}
+
+.card-header .btn-light,
+.card-header .btn-outline-light {
+    background: rgba(255,255,255,0.15);
+    border-color: rgba(255,255,255,0.3);
+    color: #fff;
+}
+
+.card-header .btn-light:hover,
+.card-header .btn-outline-light:hover {
+    background: rgba(255,255,255,0.25);
+    color: #fff;
+}
+
+.card-footer {
+    background-color: #f8f9fa;
+    border-top: 1px solid rgba(30, 60, 114, 0.1);
+}
+
+/* Card Varianten */
+.card.border-primary {
+    border: 2px solid var(--ek-primary) !important;
+}
+
+.card.border-info,
+.card.border-success,
+.card.border-danger,
+.card.border-warning {
+    border: 2px solid var(--ek-primary-light) !important;
+}
+
+/* ============================================
+   SIDEBAR
+   ============================================ */
+.sidebar {
+    position: fixed;
+    top: 0;
+    bottom: 0;
+    left: 0;
+    z-index: 100;
+    padding: 56px 0 0;
+    box-shadow: 2px 0 8px rgba(30, 60, 114, 0.1);
+    background: #fff;
+}
+
+@media (max-width: 767.98px) {
+    .sidebar {
+        top: 4rem;
+    }
+}
+
+.sidebar-sticky {
+    height: calc(100vh - 56px);
+    overflow-x: hidden;
+    overflow-y: auto;
+}
+
+.sidebar .nav-link {
+    font-weight: 500;
+    color: #333;
+    padding: 0.6rem 1rem;
+    border-left: 3px solid transparent;
+    transition: all 0.2s ease;
+}
+
+.sidebar .nav-link:hover {
+    color: var(--ek-primary);
+    background-color: rgba(30, 60, 114, 0.08);
+    border-left-color: var(--ek-accent);
+}
+
+.sidebar .nav-link.active {
+    color: var(--ek-primary);
+    background-color: rgba(30, 60, 114, 0.12);
+    border-left-color: var(--ek-primary);
+    font-weight: 600;
+}
+
+.sidebar .nav-link i {
+    color: var(--ek-primary-light);
+}
+
+.sidebar-heading {
+    font-size: .7rem;
+    letter-spacing: .15em;
+    color: var(--ek-primary);
+    font-weight: 700;
+}
+
+/* ============================================
+   NAVBAR
+   ============================================ */
+.navbar-brand {
+    padding-top: .75rem;
+    padding-bottom: .75rem;
+}
+
+/* ============================================
+   BUTTONS
+   ============================================ */
+.btn-primary {
+    background: var(--ek-gradient);
+    border: none;
+}
+
+.btn-primary:hover,
+.btn-primary:focus {
+    background: linear-gradient(135deg, #152a50 0%, #1e3c72 100%);
+    box-shadow: 0 2px 8px rgba(30, 60, 114, 0.3);
+}
+
+.btn-outline-primary {
+    color: var(--ek-primary);
+    border-color: var(--ek-primary);
+}
+
+.btn-outline-primary:hover {
+    background: var(--ek-gradient);
+    border-color: var(--ek-primary);
+    color: #fff;
+}
+
+.btn-success {
+    background: linear-gradient(135deg, #1e7e34 0%, #28a745 100%);
+    border: none;
+}
+
+.btn-danger {
+    background: linear-gradient(135deg, #bd2130 0%, #dc3545 100%);
+    border: none;
+}
+
+.btn-info {
+    background: var(--ek-gradient);
+    border: none;
+    color: #fff;
+}
+
+.btn-info:hover {
+    color: #fff;
+    background: linear-gradient(135deg, #152a50 0%, #1e3c72 100%);
+}
+
+/* ============================================
+   TABLES
+   ============================================ */
+.table {
+    margin-bottom: 0;
+}
+
+.table th {
+    border-top: none;
+    font-weight: 600;
+    color: var(--ek-primary);
+    background-color: rgba(30, 60, 114, 0.05);
+    border-bottom: 2px solid var(--ek-primary-light);
+}
+
+.table-hover tbody tr:hover {
+    background-color: rgba(30, 60, 114, 0.05);
+}
+
+.table-light th {
+    background-color: rgba(30, 60, 114, 0.08);
+}
+
+.table-primary {
+    background-color: rgba(30, 60, 114, 0.1) !important;
+}
+
+/* ============================================
+   FORMS
+   ============================================ */
+.form-label {
+    font-weight: 600;
+    margin-bottom: 0.3rem;
+    color: var(--ek-primary-dark);
+}
+
+.required:after {
+    content: " *";
+    color: #dc3545;
+}
+
+.form-control:focus,
+.form-select:focus {
+    border-color: var(--ek-accent);
+    box-shadow: 0 0 0 3px rgba(30, 60, 114, 0.15);
+}
+
+.input-group-text {
+    background: linear-gradient(135deg, #e9ecef 0%, #f8f9fa 100%);
+    border-color: #ced4da;
+    color: var(--ek-primary);
+    font-weight: 600;
+}
+
+/* ============================================
+   BADGES
+   ============================================ */
+.badge {
+    font-weight: 600;
+    padding: 0.4em 0.65em;
+}
+
+.badge.bg-primary {
+    background: var(--ek-gradient) !important;
+}
+
+.badge.bg-info {
+    background: var(--ek-primary-light) !important;
+    color: #fff !important;
+}
+
+/* ============================================
+   ALERTS
+   ============================================ */
+.alert {
+    border: none;
+    border-left: 4px solid;
+}
+
+.alert-success {
+    background-color: #d4edda;
+    border-left-color: #28a745;
+    color: #155724;
+}
+
+.alert-danger {
+    background-color: #f8d7da;
+    border-left-color: #dc3545;
+    color: #721c24;
+}
+
+.alert-warning {
+    background-color: #fff3cd;
+    border-left-color: #ffc107;
+    color: #856404;
+}
+
+.alert-info {
+    background-color: #e8f4fc;
+    border-left-color: var(--ek-primary);
+    color: var(--ek-primary-dark);
+}
+
+/* ============================================
+   TABS
+   ============================================ */
+.nav-tabs {
+    border-bottom: 2px solid var(--ek-primary-light);
+}
+
+.nav-tabs .nav-link {
+    color: var(--ek-primary);
+    border: none;
+    border-bottom: 3px solid transparent;
+    padding: 0.75rem 1.25rem;
+    font-weight: 500;
+    margin-bottom: -2px;
+}
+
+.nav-tabs .nav-link:hover {
+    border-color: transparent;
+    border-bottom-color: var(--ek-accent);
+    background: rgba(30, 60, 114, 0.05);
+}
+
+.nav-tabs .nav-link.active {
+    color: var(--ek-primary);
+    background: #fff;
+    border: none;
+    border-bottom: 3px solid var(--ek-primary);
+    font-weight: 600;
+}
+
+/* ============================================
+   STAT CARDS (Dashboard)
+   ============================================ */
+.card.bg-success,
+.card.bg-danger,
+.card.bg-info,
+.card.bg-primary,
+.card.bg-warning {
+    border: none;
+}
+
+.card.bg-primary {
+    background: var(--ek-gradient) !important;
+}
+
+.card.bg-info {
+    background: linear-gradient(135deg, #2a5298 0%, #4a90d9 100%) !important;
+}
+
+.card.bg-success {
+    background: linear-gradient(135deg, #1e7e34 0%, #28a745 100%) !important;
+}
+
+.card.bg-danger {
+    background: linear-gradient(135deg, #bd2130 0%, #dc3545 100%) !important;
+}
+
+.card.bg-warning {
+    background: linear-gradient(135deg, #d39e00 0%, #ffc107 100%) !important;
+}
+
+/* ============================================
+   U30/E1a KENNZAHLEN
+   ============================================ */
+.kennzahl-label {
+    font-family: 'Courier New', monospace;
+    font-weight: bold;
+    color: var(--ek-primary);
+    font-size: 0.85rem;
+}
+
+.kennzahl-value {
+    font-size: 1.1rem;
+    font-weight: 600;
+}
+
+.kennzahl-row {
+    padding: 0.75rem;
+    border-bottom: 1px solid rgba(30, 60, 114, 0.1);
+}
+
+.kennzahl-row:hover {
+    background-color: rgba(30, 60, 114, 0.03);
+}
+
+.kennzahl-section {
+    background: linear-gradient(135deg, rgba(30, 60, 114, 0.1) 0%, rgba(42, 82, 152, 0.1) 100%);
+    font-weight: bold;
+    padding: 0.5rem 0.75rem;
+    color: var(--ek-primary);
+}
+
+/* ============================================
+   MODALS
+   ============================================ */
+.modal-header {
+    background: var(--ek-gradient);
+    color: #fff;
+    border-bottom: none;
+}
+
+.modal-header .modal-title {
+    color: #fff;
+}
+
+.modal-header .btn-close {
+    filter: brightness(0) invert(1);
+}
+
+/* ============================================
+   FORMS CONTAINER
+   ============================================ */
+.form-container {
+    max-width: 900px;
+    margin: 0 auto;
+}
+
+/* ============================================
+   COLLAPSE INFO BOX
+   ============================================ */
+.collapse .card-body.bg-light {
+    background: linear-gradient(135deg, rgba(30, 60, 114, 0.05) 0%, rgba(42, 82, 152, 0.08) 100%) !important;
+    border-color: var(--ek-primary-light) !important;
+}
+
+/* ============================================
+   DROPDOWN
+   ============================================ */
+.dropdown-menu {
+    border: 1px solid rgba(30, 60, 114, 0.15);
+    box-shadow: 0 4px 12px rgba(30, 60, 114, 0.15);
+}
+
+.dropdown-item:hover {
+    background-color: rgba(30, 60, 114, 0.08);
+    color: var(--ek-primary);
+}
+
+/* ============================================
+   PAGE HEADER
+   ============================================ */
+.border-bottom {
+    border-bottom-color: rgba(30, 60, 114, 0.2) !important;
+}
+
+h1.h2, h2 {
+    color: var(--ek-primary);
+}
+
+/* ============================================
+   SCROLLBAR
+   ============================================ */
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #f1f1f1;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--ek-primary-light);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--ek-primary);
+}
+
+/* ============================================
+   PRINT STYLES
+   ============================================ */
+@media print {
+    .sidebar, .navbar, .btn, .no-print {
+        display: none !important;
+    }
+    
+    main {
+        margin-left: 0 !important;
+        padding: 0 !important;
+    }
+    
+    .card {
+        border: 1px solid #000 !important;
+        box-shadow: none !important;
+    }
+    
+    .card-header {
+        background: #f0f0f0 !important;
+        color: #000 !important;
+        -webkit-print-color-adjust: exact;
+    }
+}
+
+/* ============================================
+   RESPONSIVE
+   ============================================ */
+@media (max-width: 768px) {
+    .table-responsive {
+        font-size: 0.875rem;
+    }
+    
+    .card-header {
+        padding: 0.75rem 1rem;
+    }
+}
