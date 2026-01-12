@@ -65,13 +65,13 @@ function formatDatum($datum) {
 function getStatistics($year) {
     $db = db();
     
-    // Einnahmen
-    $stmt = $db->prepare("SELECT COALESCE(SUM(brutto_betrag), 0) as total FROM rechnungen WHERE typ = 'einnahme' AND YEAR(datum) = ?");
+    // Einnahmen (NETTO - für E/A Rechnung in Österreich)
+    $stmt = $db->prepare("SELECT COALESCE(SUM(netto_betrag), 0) as total FROM rechnungen WHERE typ = 'einnahme' AND YEAR(datum) = ?");
     $stmt->execute([$year]);
     $einnahmen = $stmt->fetch()['total'];
     
-    // Ausgaben
-    $stmt = $db->prepare("SELECT COALESCE(SUM(brutto_betrag), 0) as total FROM rechnungen WHERE typ = 'ausgabe' AND YEAR(datum) = ?");
+    // Ausgaben (NETTO)
+    $stmt = $db->prepare("SELECT COALESCE(SUM(netto_betrag), 0) as total FROM rechnungen WHERE typ = 'ausgabe' AND YEAR(datum) = ?");
     $stmt->execute([$year]);
     $ausgaben = $stmt->fetch()['total'];
     
@@ -91,9 +91,9 @@ function getStatistics($year) {
     
     return [
         'einnahmen' => $einnahmen,
-        'ausgaben' => $ausgaben + $afa,
+        'ausgaben' => $ausgaben + $afa,  // Ausgaben inkl. AfA
         'ust_zahllast' => $ustEinnahmen - $vorsteuer,
-        'gewinn' => $einnahmen - $ausgaben - $afa,
+        'gewinn' => $einnahmen - $ausgaben - $afa,  // Netto-Gewinn
         'afa' => $afa
     ];
 }
@@ -106,13 +106,13 @@ function getMonthlyData($year) {
     $einnahmen = array_fill(0, 12, 0);
     $ausgaben = array_fill(0, 12, 0);
     
-    $stmt = $db->prepare("SELECT MONTH(datum) as monat, SUM(brutto_betrag) as total FROM rechnungen WHERE typ = 'einnahme' AND YEAR(datum) = ? GROUP BY MONTH(datum)");
+    $stmt = $db->prepare("SELECT MONTH(datum) as monat, SUM(netto_betrag) as total FROM rechnungen WHERE typ = 'einnahme' AND YEAR(datum) = ? GROUP BY MONTH(datum)");
     $stmt->execute([$year]);
     foreach ($stmt->fetchAll() as $row) {
         $einnahmen[$row['monat'] - 1] = floatval($row['total']);
     }
     
-    $stmt = $db->prepare("SELECT MONTH(datum) as monat, SUM(brutto_betrag) as total FROM rechnungen WHERE typ = 'ausgabe' AND YEAR(datum) = ? GROUP BY MONTH(datum)");
+    $stmt = $db->prepare("SELECT MONTH(datum) as monat, SUM(netto_betrag) as total FROM rechnungen WHERE typ = 'ausgabe' AND YEAR(datum) = ? GROUP BY MONTH(datum)");
     $stmt->execute([$year]);
     foreach ($stmt->fetchAll() as $row) {
         $ausgaben[$row['monat'] - 1] = floatval($row['total']);
