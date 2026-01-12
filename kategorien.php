@@ -167,7 +167,7 @@ $e1aKennzahlen = [
                     <!-- Einnahmen-Kategorien -->
                     <div class="col-md-6">
                         <div class="card mb-4">
-                            <div class="card-header bg-success text-white">
+                            <div class="card-header">
                                 <h5 class="mb-0">
                                     <i class="bi bi-arrow-down-circle me-2"></i>Einnahmen-Kategorien
                                     <span class="badge bg-light text-success float-end"><?= count($einnahmenKategorien) ?></span>
@@ -233,7 +233,7 @@ $e1aKennzahlen = [
                     <!-- Ausgaben-Kategorien -->
                     <div class="col-md-6">
                         <div class="card mb-4">
-                            <div class="card-header bg-danger text-white">
+                            <div class="card-header">
                                 <h5 class="mb-0">
                                     <i class="bi bi-arrow-up-circle me-2"></i>Ausgaben-Kategorien
                                     <span class="badge bg-light text-danger float-end"><?= count($ausgabenKategorien) ?></span>

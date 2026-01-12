@@ -184,7 +184,7 @@ $e1aKennzahlen = [
                     <div class="row">
                         <div class="col-lg-6">
                             <div class="card mb-4">
-                                <div class="card-header bg-primary text-white">
+                                <div class="card-header">
                                     <i class="bi bi-building me-2"></i>Firmendaten
                                 </div>
                                 <div class="card-body">
@@ -226,7 +226,7 @@ $e1aKennzahlen = [
 
                         <div class="col-lg-6">
                             <div class="card mb-4">
-                                <div class="card-header bg-success text-white">
+                                <div class="card-header">
                                     <i class="bi bi-bank me-2"></i>Steuer & Bank
                                 </div>
                                 <div class="card-body">
@@ -263,7 +263,7 @@ $e1aKennzahlen = [
                             </div>
 
                             <div class="card mb-4">
-                                <div class="card-header bg-info text-white">
+                                <div class="card-header">
                                     <i class="bi bi-calendar me-2"></i>Buchhaltung
                                 </div>
                                 <div class="card-body">
@@ -302,7 +302,7 @@ $e1aKennzahlen = [
                 <!-- UST-SÄTZE -->
                 <?php if ($action === 'edit' || $action === 'new'): ?>
                 <div class="card">
-                    <div class="card-header bg-primary text-white"><?= $action === 'new' ? 'Neuer USt-Satz' : 'USt-Satz bearbeiten' ?></div>
+                    <div class="card-header"><?= $action === 'new' ? 'Neuer USt-Satz' : 'USt-Satz bearbeiten' ?></div>
                     <div class="card-body">
                         <form method="POST">
                             <input type="hidden" name="id" value="<?= $ustSatz['id'] ?? '' ?>">
@@ -341,7 +341,7 @@ $e1aKennzahlen = [
                 </div>
                 <?php else: ?>
                 <div class="card">
-                    <div class="card-header bg-primary text-white d-flex justify-content-between">
+                    <div class="card-header d-flex justify-content-between">
                         <span><i class="bi bi-percent me-2"></i>USt-Sätze</span>
                         <a href="?tab=ust&action=new" class="btn btn-light btn-sm">+ Neu</a>
                     </div>
@@ -375,7 +375,7 @@ $e1aKennzahlen = [
                 <!-- KATEGORIEN -->
                 <?php if ($action === 'edit' || $action === 'new'): ?>
                 <div class="card">
-                    <div class="card-header bg-success text-white"><?= $action === 'new' ? 'Neue Kategorie' : 'Kategorie bearbeiten' ?></div>
+                    <div class="card-header"><?= $action === 'new' ? 'Neue Kategorie' : 'Kategorie bearbeiten' ?></div>
                     <div class="card-body">
                         <form method="POST">
                             <input type="hidden" name="id" value="<?= $kategorie['id'] ?? '' ?>">
@@ -429,7 +429,7 @@ $e1aKennzahlen = [
                 </div>
                 <?php else: ?>
                 <div class="card">
-                    <div class="card-header bg-success text-white d-flex justify-content-between">
+                    <div class="card-header d-flex justify-content-between">
                         <span><i class="bi bi-tags me-2"></i>Kategorien</span>
                         <a href="?tab=kategorien&action=new" class="btn btn-light btn-sm">+ Neu</a>
                     </div>
@@ -460,8 +460,8 @@ $e1aKennzahlen = [
                 <!-- KENNZAHLEN-REFERENZ -->
                 <div class="row">
                     <div class="col-md-6">
-                        <div class="card border-primary mb-4">
-                            <div class="card-header bg-primary text-white"><i class="bi bi-file-text me-2"></i>U30 Kennzahlen 2025</div>
+                        <div class="card mb-4">
+                            <div class="card-header"><i class="bi bi-file-text me-2"></i>U30 Kennzahlen 2025</div>
                             <div class="card-body">
                                 <h6>Umsatzsteuer</h6>
                                 <table class="table table-sm">
@@ -483,8 +483,8 @@ $e1aKennzahlen = [
                         </div>
                     </div>
                     <div class="col-md-6">
-                        <div class="card border-danger mb-4">
-                            <div class="card-header bg-danger text-white"><i class="bi bi-file-text me-2"></i>E1a Kennzahlen 2024</div>
+                        <div class="card mb-4">
+                            <div class="card-header"><i class="bi bi-file-text me-2"></i>E1a Kennzahlen 2024</div>
                             <div class="card-body">
                                 <h6>Einnahmen</h6>
                                 <table class="table table-sm">
@@ -496,9 +496,9 @@ $e1aKennzahlen = [
                                     <tr><td>Wareneinkauf</td><td><code>9100</code></td></tr>
                                     <tr><td>Fremdleistungen</td><td><code>9110</code></td></tr>
                                     <tr><td>Personalaufwand</td><td><code>9120</code></td></tr>
-                                    <tr class="table-warning"><td><strong>AfA normal</strong></td><td><code>9130</code></td></tr>
-                                    <tr class="table-warning"><td><strong>AfA degressiv</strong></td><td><code>9134</code></td></tr>
-                                    <tr class="table-warning"><td><strong>AfA Gebäude</strong></td><td><code>9135</code></td></tr>
+                                    <tr class="table-primary"><td><strong>AfA normal</strong></td><td><code>9130</code></td></tr>
+                                    <tr class="table-primary"><td><strong>AfA degressiv</strong></td><td><code>9134</code></td></tr>
+                                    <tr class="table-primary"><td><strong>AfA Gebäude</strong></td><td><code>9135</code></td></tr>
                                     <tr><td>Betriebsräume</td><td><code>9140</code></td></tr>
                                     <tr><td>Instandhaltung</td><td><code>9150</code></td></tr>
                                     <tr><td>SVS Beiträge</td><td><code>9225</code></td></tr>

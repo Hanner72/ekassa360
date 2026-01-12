@@ -378,7 +378,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="card mb-4">
-                                    <div class="card-header bg-success text-white">
+                                    <div class="card-header">
                                         <h5 class="mb-0"><i class="bi bi-arrow-down-circle me-2"></i>Einnahmen nach Kategorien</h5>
                                     </div>
                                     <div class="card-body">
@@ -407,7 +407,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                                                 endforeach; 
                                                 ?>
                                             </tbody>
-                                            <tfoot class="table-success">
+                                            <tfoot class="table-primary">
                                                 <tr>
                                                     <th>Gesamt</th>
                                                     <th></th>
@@ -420,7 +420,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                             </div>
                             <div class="col-md-6">
                                 <div class="card mb-4">
-                                    <div class="card-header bg-danger text-white">
+                                    <div class="card-header">
                                         <h5 class="mb-0"><i class="bi bi-arrow-up-circle me-2"></i>Ausgaben nach Kategorien</h5>
                                     </div>
                                     <div class="card-body">
@@ -449,7 +449,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                                                 endforeach; 
                                                 ?>
                                             </tbody>
-                                            <tfoot class="table-danger">
+                                            <tfoot class="table-primary">
                                                 <tr>
                                                     <th>Gesamt</th>
                                                     <th></th>
@@ -473,7 +473,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="card mb-4">
-                                    <div class="card-header bg-success text-white">
+                                    <div class="card-header">
                                         <h5 class="mb-0"><i class="bi bi-person-check me-2"></i>Top 10 Kunden</h5>
                                     </div>
                                     <div class="card-body">
@@ -506,7 +506,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                             </div>
                             <div class="col-md-6">
                                 <div class="card mb-4">
-                                    <div class="card-header bg-danger text-white">
+                                    <div class="card-header">
                                         <h5 class="mb-0"><i class="bi bi-truck me-2"></i>Top 10 Lieferanten</h5>
                                     </div>
                                     <div class="card-body">
