@@ -45,7 +45,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'kz065' => floatval($_POST['kz065'] ?? 0),
             'kz066' => floatval($_POST['kz066'] ?? 0),
             'kz070' => floatval($_POST['kz070'] ?? 0),
-            'kz071' => floatval($_POST['kz071'] ?? 0),
+            'kz072' => floatval($_POST['kz072'] ?? 0),
             'kz082' => floatval($_POST['kz082'] ?? 0),
             'kz095' => floatval($_POST['zahllast']),
             'zahllast' => floatval($_POST['zahllast']),
@@ -413,6 +413,50 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                         </div>
                     </div>
 
+                    <!-- Innergemeinschaftliche Erwerbe (igE) -->
+                    <?php if (($u30['kz070'] ?? 0) > 0): ?>
+                    <div class="card mb-4 border-primary">
+                        <div class="card-header bg-primary text-white">
+                            <h5 class="mb-0"><i class="bi bi-globe-europe-africa me-2"></i>Innergemeinschaftliche Erwerbe (igE)</h5>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                <i class="bi bi-info-circle me-1"></i>
+                                EU-Einkäufe mit Reverse Charge. Die Erwerbsteuer (KZ 072) wird gleichzeitig als Vorsteuer (KZ 065) abgezogen.
+                            </p>
+                            <table class="table">
+                                <tr>
+                                    <td width="60%">Bemessungsgrundlage igE (Netto aus EU)</td>
+                                    <td width="15%" class="text-center"><strong>KZ 070</strong></td>
+                                    <td width="25%">
+                                        <input type="number" step="0.01" class="form-control text-end" name="kz070" 
+                                               value="<?= number_format($u30['kz070'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
+                                    </td>
+                                </tr>
+                                <tr>
+                                    <td>Erwerbsteuer 20% daraus</td>
+                                    <td class="text-center"><strong>KZ 072</strong></td>
+                                    <td>
+                                        <input type="number" step="0.01" class="form-control text-end bg-light" 
+                                               value="<?= number_format($u30['kz072'] ?? 0, 2, '.', '') ?>" readonly>
+                                    </td>
+                                </tr>
+                                <tr class="table-success">
+                                    <td>Vorsteuer aus igE (gleicht Erwerbsteuer aus)</td>
+                                    <td class="text-center"><strong>KZ 065</strong></td>
+                                    <td>
+                                        <input type="number" step="0.01" class="form-control text-end" name="kz065" 
+                                               value="<?= number_format($u30['kz065'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
+                                    </td>
+                                </tr>
+                            </table>
+                            <div class="alert alert-info mb-0">
+                                <small><strong>Ergebnis igE:</strong> Erwerbsteuer <?= formatBetrag($u30['kz072'] ?? 0) ?> − Vorsteuer <?= formatBetrag($u30['kz065']) ?> = <strong><?= formatBetrag(($u30['kz072'] ?? 0) - $u30['kz065']) ?></strong> (Nullsumme)</small>
+                            </div>
+                        </div>
+                    </div>
+                    <?php endif; ?>
+
                     <div class="card mb-4">
                         <div class="card-header">
                             <h5 class="mb-0">Vorsteuer</h5>
@@ -420,11 +464,38 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                         <div class="card-body">
                             <table class="table">
                                 <tr>
-                                    <td width="60%">Gesamtbetrag der Vorsteuer</td>
+                                    <td width="60%">Vorsteuer aus Inlandsrechnungen</td>
                                     <td width="15%" class="text-center"><strong>KZ 060</strong></td>
                                     <td width="25%">
                                         <input type="number" step="0.01" class="form-control text-end" name="kz060" 
                                                value="<?= number_format($u30['kz060'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
+                                    </td>
+                                </tr>
+                                <?php if (($u30['kz061'] ?? 0) > 0): ?>
+                                <tr>
+                                    <td>Einfuhr-USt (Drittland-Importe)</td>
+                                    <td class="text-center"><strong>KZ 061</strong></td>
+                                    <td>
+                                        <input type="number" step="0.01" class="form-control text-end" name="kz061" 
+                                               value="<?= number_format($u30['kz061'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
+                                    </td>
+                                </tr>
+                                <?php endif; ?>
+                                <?php if (($u30['kz065'] ?? 0) > 0): ?>
+                                <tr>
+                                    <td>Vorsteuer aus igE (siehe oben)</td>
+                                    <td class="text-center"><strong>KZ 065</strong></td>
+                                    <td>
+                                        <input type="number" step="0.01" class="form-control text-end bg-light" 
+                                               value="<?= number_format($u30['kz065'], 2, '.', '') ?>" readonly>
+                                    </td>
+                                </tr>
+                                <?php endif; ?>
+                                <tr class="table-light fw-bold">
+                                    <td>Vorsteuer gesamt</td>
+                                    <td></td>
+                                    <td class="text-end">
+                                        <?= formatBetrag(($u30['kz060'] ?? 0) + ($u30['kz061'] ?? 0) + ($u30['kz065'] ?? 0)) ?>
                                     </td>
                                 </tr>
                             </table>
@@ -433,7 +504,8 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
 
                     <!-- Ergebnis -->
                     <?php 
-                    $ustGesamt = ($u30['kz029'] ?? 0) + ($u30['kz027'] ?? 0) + ($u30['kz052'] ?? 0);
+                    $ustGesamt = ($u30['kz029'] ?? 0) + ($u30['kz027'] ?? 0) + ($u30['kz052'] ?? 0) + ($u30['kz072'] ?? 0);
+                    $vorsteuerGesamt = ($u30['kz060'] ?? 0) + ($u30['kz061'] ?? 0) + ($u30['kz065'] ?? 0);
                     ?>
                     <div class="card mb-4 <?= ($u30['zahllast'] ?? 0) >= 0 ? 'border-danger' : 'border-success' ?>">
                         <div class="card-header">
@@ -446,7 +518,7 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                                 <div class="col-md-8">
                                     <p class="mb-0">
                                         USt (<?= formatBetrag($ustGesamt) ?>)
-                                        − Vorsteuer (<?= formatBetrag($u30['kz060'] ?? 0) ?>)
+                                        − Vorsteuer (<?= formatBetrag($vorsteuerGesamt) ?>)
                                     </p>
                                 </div>
                                 <div class="col-md-4">

@@ -154,6 +154,17 @@ function getRechnungen($filters = []) {
         $params[] = $filters['bezahlt'];
     }
     
+    // Volltextsuche
+    if (!empty($filters['suche'])) {
+        $suchbegriff = '%' . $filters['suche'] . '%';
+        $where[] = "(r.kunde_lieferant LIKE ? OR r.rechnungsnummer LIKE ? OR r.beschreibung LIKE ? OR r.notizen LIKE ? OR r.buchungsnummer LIKE ?)";
+        $params[] = $suchbegriff;
+        $params[] = $suchbegriff;
+        $params[] = $suchbegriff;
+        $params[] = $suchbegriff;
+        $params[] = $suchbegriff;
+    }
+    
     $whereClause = !empty($where) ? 'WHERE ' . implode(' AND ', $where) : '';
     
     $sql = "SELECT r.*, k.name as kategorie_name, u.bezeichnung as ust_name, u.satz as ust_prozent
@@ -220,6 +231,15 @@ function saveRechnung($data) {
     $ustBetrag = $data['netto_betrag'] * ($ustProzent / 100);
     $bruttoBetrag = $data['netto_betrag'] + $ustBetrag;
     
+    // Bei EU B2C: Bruttobetrag inkl. ausländischer USt (nicht abzugsfähig)
+    $buchungsart = $data['buchungsart'] ?? 'inland';
+    if ($buchungsart === 'eu_b2c' && !empty($data['ausland_ust_betrag'])) {
+        // Ausländische USt zum Brutto addieren (als Aufwand)
+        $auslandUst = str_replace(',', '.', $data['ausland_ust_betrag']);
+        $bruttoBetrag = $data['netto_betrag'] + floatval($auslandUst);
+        $ustBetrag = 0; // Keine österreichische Vorsteuer!
+    }
+    
     // Buchungsnummer ermitteln
     $buchungsnummer = $data['buchungsnummer'] ?? null;
     if (empty($buchungsnummer) && empty($data['id'])) {
@@ -231,20 +251,28 @@ function saveRechnung($data) {
     // Benutzer-ID für Protokoll
     $benutzer_id = $_SESSION['benutzer_id'] ?? null;
     
+    // EU-Felder aufbereiten
+    $lieferant_land = $data['lieferant_land'] ?? null;
+    $lieferant_uid = $data['lieferant_uid'] ?? null;
+    $ausland_ust_satz = !empty($data['ausland_ust_satz']) ? str_replace(',', '.', $data['ausland_ust_satz']) : null;
+    $ausland_ust_betrag = !empty($data['ausland_ust_betrag']) ? str_replace(',', '.', $data['ausland_ust_betrag']) : null;
+    
     if (!empty($data['id'])) {
         // Update
         $stmt = $db->prepare("UPDATE rechnungen SET 
             typ = ?, rechnungsnummer = ?, buchungsnummer = ?, datum = ?, faellig_am = ?,
             kunde_lieferant = ?, beschreibung = ?, netto_betrag = ?,
             ust_satz_id = ?, ust_betrag = ?, brutto_betrag = ?,
-            kategorie_id = ?, bezahlt = ?, bezahlt_am = ?, notizen = ?, geaendert_von = ?
+            kategorie_id = ?, bezahlt = ?, bezahlt_am = ?, notizen = ?, geaendert_von = ?,
+            buchungsart = ?, lieferant_land = ?, lieferant_uid = ?, ausland_ust_satz = ?, ausland_ust_betrag = ?
             WHERE id = ?");
         $result = $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
             $data['kunde_lieferant'], $data['beschreibung'], $data['netto_betrag'],
             $data['ust_satz_id'] ?: null, $ustBetrag, $bruttoBetrag,
             $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null, $data['notizen'],
-            $benutzer_id, $data['id']
+            $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag,
+            $data['id']
         ]);
         
         if ($result && function_exists('logAction')) {
@@ -256,14 +284,15 @@ function saveRechnung($data) {
         // Insert
         $stmt = $db->prepare("INSERT INTO rechnungen 
             (typ, rechnungsnummer, buchungsnummer, datum, faellig_am, kunde_lieferant, beschreibung, 
-             netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, kategorie_id, bezahlt, bezahlt_am, notizen, erstellt_von)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+             netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, kategorie_id, bezahlt, bezahlt_am, notizen, erstellt_von,
+             buchungsart, lieferant_land, lieferant_uid, ausland_ust_satz, ausland_ust_betrag)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
             $data['kunde_lieferant'], $data['beschreibung'], $data['netto_betrag'],
             $data['ust_satz_id'] ?: null, $ustBetrag, $bruttoBetrag,
             $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null, $data['notizen'],
-            $benutzer_id
+            $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag
         ]);
         $id = $db->lastInsertId();
         
@@ -388,10 +417,11 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
         'kz035' => 0,   // Bemessung 13%
         'kz052' => 0,   // Steuer 13%
         'kz060' => 0,   // Vorsteuer gesamt
+        'kz061' => 0,   // Einfuhr-USt Drittland
         'kz065' => 0,   // Vorsteuer ig. Erwerb
         'kz066' => 0,   // Vorsteuer §19
         'kz070' => 0,   // IG Erwerbe Bemessung
-        'kz071' => 0,   // IG Erwerbe Steuer
+        'kz072' => 0,   // IG Erwerbe Steuer (Erwerbsteuer)
         'kz082' => 0,   // Vorsteuerberichtigung
         'kz095' => 0,   // Zahllast/Gutschrift
         'zahllast' => 0
@@ -446,13 +476,45 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     }
     $u30['kz000'] = $gesamtLieferungen;
     
-    // Vorsteuer (Ausgaben)
+    // Vorsteuer (Ausgaben) - nur Inland und Drittland-Import
     $sql = "SELECT SUM(r.ust_betrag) as vorsteuer
             FROM rechnungen r
-            WHERE r.typ = 'ausgabe' AND $datumFilter";
+            WHERE r.typ = 'ausgabe' 
+            AND (r.buchungsart IS NULL OR r.buchungsart IN ('inland', 'drittland'))
+            AND $datumFilter";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $vorsteuerRechnungen = $stmt->fetch()['vorsteuer'] ?? 0;
+    
+    // Einfuhr-USt Drittland separat (KZ 061)
+    $sql = "SELECT SUM(r.ust_betrag) as vorsteuer
+            FROM rechnungen r
+            WHERE r.typ = 'ausgabe' 
+            AND r.buchungsart = 'drittland'
+            AND $datumFilter";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $vorsteuerDrittland = $stmt->fetch()['vorsteuer'] ?? 0;
+    $u30['kz061'] = $vorsteuerDrittland;
+    
+    // Innergemeinschaftliche Erwerbe (igE) - Buchungsart 'eu_ige'
+    $sql = "SELECT SUM(r.netto_betrag) as netto
+            FROM rechnungen r
+            WHERE r.typ = 'ausgabe' 
+            AND r.buchungsart = 'eu_ige'
+            AND $datumFilter";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    $igeNetto = $stmt->fetch()['netto'] ?? 0;
+    
+    if ($igeNetto > 0) {
+        // igE: Bemessungsgrundlage (Netto aus EU-Einkäufen)
+        $u30['kz070'] = $igeNetto;
+        // igE: Erwerbsteuer 20% (diese wird geschuldet) - KZ 072
+        $u30['kz072'] = $igeNetto * 0.20;
+        // igE: Gleichzeitig Vorsteuer daraus (gleicht sich aus) - KZ 065
+        $u30['kz065'] = $igeNetto * 0.20;
+    }
     
     // Vorsteuer aus Anlagegütern
     if ($typ == 'quartal') {
@@ -465,11 +527,12 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     $stmt->execute($params);
     $vorsteuerAnlagen = $stmt->fetch()['vorsteuer'] ?? 0;
     
-    $u30['kz060'] = $vorsteuerRechnungen + $vorsteuerAnlagen;
+    // Vorsteuer gesamt (ohne igE-Vorsteuer, die separat in kz065 steht)
+    $u30['kz060'] = $vorsteuerRechnungen - $vorsteuerDrittland + $vorsteuerAnlagen;
     
     // Zahllast berechnen: Summe aller Steuerbeträge - Vorsteuer
-    $ustGesamt = $u30['kz029'] + $u30['kz027'] + $u30['kz052'] + $u30['kz071'];
-    $vorsteuerGesamt = $u30['kz060'] + $u30['kz065'] + $u30['kz066'];
+    $ustGesamt = $u30['kz029'] + $u30['kz027'] + $u30['kz052'] + $u30['kz072'];
+    $vorsteuerGesamt = $u30['kz060'] + $u30['kz061'] + $u30['kz065'] + $u30['kz066'];
     $u30['zahllast'] = $ustGesamt - $vorsteuerGesamt;
     $u30['kz095'] = $u30['zahllast'];
     
@@ -521,15 +584,21 @@ function saveUstVoranmeldung($data) {
 // ============================================
 
 /**
- * Einkommensteuer berechnen
+ * Einkommensteuer berechnen - dynamisch für alle Kennzahlen
  */
 function berechneEinkommensteuer($jahr) {
     $db = db();
     
-    // E1a Kennzahlen gemäß Formular 2024
+    // Alle verwendeten E1a-Kennzahlen aus Kategorien laden
+    $stmt = $db->query("SELECT DISTINCT e1a_kennzahl, typ FROM kategorien WHERE e1a_kennzahl IS NOT NULL AND e1a_kennzahl != ''");
+    $kategorieKennzahlen = $stmt->fetchAll();
+    
+    // E1a Array dynamisch aufbauen - Standard-Kennzahlen + alle aus Kategorien
     $e1a = [
+        // Standard Einnahmen-Kennzahlen
         'kz9040' => 0, // Erlöse Lieferungen/Leistungen
         'kz9050' => 0, // Erlöse Dienstleistungen
+        // Standard Ausgaben-Kennzahlen
         'kz9100' => 0, // Wareneinkauf
         'kz9110' => 0, // Fremdleistungen
         'kz9120' => 0, // Personalaufwand
@@ -538,10 +607,27 @@ function berechneEinkommensteuer($jahr) {
         'kz9135' => 0, // AfA Gebäude beschleunigt
         'kz9140' => 0, // Betriebsräumlichkeiten
         'kz9150' => 0, // Sonstige Ausgaben
-        'gewinn_verlust' => 0
+        'gewinn_verlust' => 0,
+        // Metadaten für Typ-Zuordnung
+        '_einnahmen_kz' => ['9040', '9050'],
+        '_ausgaben_kz' => ['9100', '9110', '9120', '9130', '9134', '9135', '9140', '9150']
     ];
     
-    // Einnahmen nach Kategorie
+    // Dynamisch Kennzahlen aus Kategorien hinzufügen
+    foreach ($kategorieKennzahlen as $kat) {
+        $kz = 'kz' . $kat['e1a_kennzahl'];
+        if (!isset($e1a[$kz])) {
+            $e1a[$kz] = 0;
+        }
+        // Typ merken für Gewinnberechnung
+        if ($kat['typ'] === 'einnahme' && !in_array($kat['e1a_kennzahl'], $e1a['_einnahmen_kz'])) {
+            $e1a['_einnahmen_kz'][] = $kat['e1a_kennzahl'];
+        } elseif ($kat['typ'] === 'ausgabe' && !in_array($kat['e1a_kennzahl'], $e1a['_ausgaben_kz'])) {
+            $e1a['_ausgaben_kz'][] = $kat['e1a_kennzahl'];
+        }
+    }
+    
+    // Einnahmen nach Kategorie - ALLE Kennzahlen
     $sql = "SELECT k.e1a_kennzahl, COALESCE(SUM(r.netto_betrag), 0) as summe
             FROM rechnungen r
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
@@ -552,30 +638,41 @@ function berechneEinkommensteuer($jahr) {
     foreach ($stmt->fetchAll() as $row) {
         if ($row['e1a_kennzahl']) {
             $kz = 'kz' . $row['e1a_kennzahl'];
-            if (isset($e1a[$kz])) {
-                $e1a[$kz] += $row['summe'];
+            // Kennzahl dynamisch hinzufügen falls nicht vorhanden
+            if (!isset($e1a[$kz])) {
+                $e1a[$kz] = 0;
+                $e1a['_einnahmen_kz'][] = $row['e1a_kennzahl'];
             }
+            $e1a[$kz] += $row['summe'];
         }
     }
     
-    // Ausgaben nach Kategorie
-    $sql = "SELECT k.e1a_kennzahl, COALESCE(SUM(r.netto_betrag), 0) as summe
+    // Ausgaben nach Kategorie - ALLE Kennzahlen
+    // Bei EU B2C: Netto + ausländische USt (da nicht abzugsfähig)
+    $sql = "SELECT k.e1a_kennzahl, r.buchungsart, r.netto_betrag, r.ausland_ust_betrag
             FROM rechnungen r
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
-            WHERE r.typ = 'ausgabe' AND YEAR(r.datum) = ?
-            GROUP BY k.e1a_kennzahl";
+            WHERE r.typ = 'ausgabe' AND YEAR(r.datum) = ?";
     $stmt = $db->prepare($sql);
     $stmt->execute([$jahr]);
     foreach ($stmt->fetchAll() as $row) {
         if ($row['e1a_kennzahl']) {
             $kz = 'kz' . $row['e1a_kennzahl'];
-            if (isset($e1a[$kz])) {
-                $e1a[$kz] += $row['summe'];
+            // Kennzahl dynamisch hinzufügen falls nicht vorhanden
+            if (!isset($e1a[$kz])) {
+                $e1a[$kz] = 0;
+                $e1a['_ausgaben_kz'][] = $row['e1a_kennzahl'];
+            }
+            // Bei EU B2C: Bruttobetrag als Aufwand (ausländische USt nicht abzugsfähig!)
+            if ($row['buchungsart'] === 'eu_b2c' && $row['ausland_ust_betrag'] > 0) {
+                $e1a[$kz] += $row['netto_betrag'] + $row['ausland_ust_betrag'];
+            } else {
+                $e1a[$kz] += $row['netto_betrag'];
             }
         }
     }
     
-    // AfA nach E1a-Kennzahl aufschlüsseln (9130, 9134, 9135)
+    // AfA nach E1a-Kennzahl aufschlüsseln
     $sql = "SELECT a.e1a_kennzahl, COALESCE(SUM(ab.afa_betrag), 0) as afa
             FROM afa_buchungen ab
             JOIN anlagegueter a ON ab.anlagegut_id = a.id
@@ -584,18 +681,29 @@ function berechneEinkommensteuer($jahr) {
     $stmt = $db->prepare($sql);
     $stmt->execute([$jahr]);
     foreach ($stmt->fetchAll() as $row) {
-        $kz = 'kz' . ($row['e1a_kennzahl'] ?: '9130');
-        if (isset($e1a[$kz])) {
-            $e1a[$kz] += $row['afa'];
+        $kennzahl = $row['e1a_kennzahl'] ?: '9130';
+        $kz = 'kz' . $kennzahl;
+        if (!isset($e1a[$kz])) {
+            $e1a[$kz] = 0;
+            $e1a['_ausgaben_kz'][] = $kennzahl;
         }
+        $e1a[$kz] += $row['afa'];
     }
     
-    // Gewinn berechnen
-    $einnahmen = $e1a['kz9040'] + $e1a['kz9050'];
-    $ausgaben = $e1a['kz9100'] + $e1a['kz9110'] + $e1a['kz9120'] 
-              + $e1a['kz9130'] + $e1a['kz9134'] + $e1a['kz9135'] 
-              + $e1a['kz9140'] + $e1a['kz9150'];
+    // Gewinn berechnen - DYNAMISCH alle Einnahmen minus alle Ausgaben
+    $einnahmen = 0;
+    foreach ($e1a['_einnahmen_kz'] as $kz) {
+        $einnahmen += $e1a['kz' . $kz] ?? 0;
+    }
+    
+    $ausgaben = 0;
+    foreach ($e1a['_ausgaben_kz'] as $kz) {
+        $ausgaben += $e1a['kz' . $kz] ?? 0;
+    }
+    
     $e1a['gewinn_verlust'] = $einnahmen - $ausgaben;
+    $e1a['_summe_einnahmen'] = $einnahmen;
+    $e1a['_summe_ausgaben'] = $ausgaben;
     
     return $e1a;
 }
