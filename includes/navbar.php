@@ -1,8 +1,9 @@
 <?php
 $firma = getFirmendaten();
 $currentYear = date('Y');
+$currentUser = getCurrentUser();
 ?>
-<nav class="navbar sticky-top flex-md-nowrap p-0 shadow-lg" style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%);">
+<nav class="navbar sticky-top flex-md-nowrap p-0 shadow-lg" style="background: linear-gradient(135deg, #1e3c72 0%, #2a5298 50%, #1e3c72 100%); z-index: 1030;">
     <!-- Logo & Brand -->
     <a class="navbar-brand col-md-3 col-lg-2 me-0 px-3 py-2 d-flex align-items-center" href="index.php" style="background: rgba(0,0,0,0.2);">
         <div class="d-flex align-items-center">
@@ -26,8 +27,8 @@ $currentYear = date('Y');
         <?php endif; ?>
     </div>
     
-    <!-- Rechte Seite: Jahr + Einstellungen -->
-    <div class="navbar-nav flex-row">
+    <!-- Rechte Seite: Jahr + Benutzer + Logout -->
+    <div class="navbar-nav flex-row align-items-center">
         <!-- Aktuelles Jahr Badge -->
         <div class="nav-item d-none d-md-flex align-items-center me-2">
             <span class="badge px-3 py-2" style="background: rgba(255,255,255,0.15); color: #fff;">
@@ -43,6 +44,53 @@ $currentYear = date('Y');
             <i class="bi bi-gear-fill me-1"></i>
             <span class="d-none d-lg-inline">Einstellungen</span>
         </a>
+        
+        <!-- Benutzer-Dropdown -->
+        <?php if ($currentUser): ?>
+        <div class="nav-item dropdown" style="position: relative;">
+            <a class="nav-link px-3 py-2 d-flex align-items-center text-white dropdown-toggle" href="#" 
+               role="button" data-bs-toggle="dropdown" aria-expanded="false"
+               style="transition: all 0.3s ease;">
+                <i class="bi bi-person-circle me-1"></i>
+                <span class="d-none d-lg-inline"><?= htmlspecialchars($currentUser['benutzername']) ?></span>
+                <?php if ($currentUser['rolle'] === 'admin'): ?>
+                    <span class="badge bg-warning text-dark ms-1 d-none d-xl-inline" style="font-size: 0.65rem;">Admin</span>
+                <?php endif; ?>
+            </a>
+            <ul class="dropdown-menu dropdown-menu-end shadow" style="border-radius: 0; position: absolute; z-index: 1050;">
+                <li>
+                    <span class="dropdown-item-text text-muted small">
+                        Angemeldet als<br>
+                        <strong><?= htmlspecialchars(getCurrentUserName()) ?></strong>
+                    </span>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                    <a class="dropdown-item" href="passwort_aendern.php">
+                        <i class="bi bi-key me-2"></i>Passwort ändern
+                    </a>
+                </li>
+                <?php if (isAdmin()): ?>
+                <li>
+                    <a class="dropdown-item" href="benutzerverwaltung.php">
+                        <i class="bi bi-people me-2"></i>Benutzerverwaltung
+                    </a>
+                </li>
+                <li>
+                    <a class="dropdown-item" href="protokoll.php">
+                        <i class="bi bi-journal-text me-2"></i>Änderungsprotokoll
+                    </a>
+                </li>
+                <?php endif; ?>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                    <a class="dropdown-item text-danger" href="logout.php">
+                        <i class="bi bi-box-arrow-right me-2"></i>Abmelden
+                    </a>
+                </li>
+            </ul>
+        </div>
+        <?php endif; ?>
     </div>
     
     <!-- Mobile Toggle -->

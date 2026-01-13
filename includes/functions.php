@@ -228,34 +228,50 @@ function saveRechnung($data) {
         $buchungsnummer = getNextBuchungsnummer('rechnungen', $jahr);
     }
     
+    // Benutzer-ID für Protokoll
+    $benutzer_id = $_SESSION['benutzer_id'] ?? null;
+    
     if (!empty($data['id'])) {
         // Update
         $stmt = $db->prepare("UPDATE rechnungen SET 
             typ = ?, rechnungsnummer = ?, buchungsnummer = ?, datum = ?, faellig_am = ?,
             kunde_lieferant = ?, beschreibung = ?, netto_betrag = ?,
             ust_satz_id = ?, ust_betrag = ?, brutto_betrag = ?,
-            kategorie_id = ?, bezahlt = ?, bezahlt_am = ?, notizen = ?
+            kategorie_id = ?, bezahlt = ?, bezahlt_am = ?, notizen = ?, geaendert_von = ?
             WHERE id = ?");
-        return $stmt->execute([
+        $result = $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
             $data['kunde_lieferant'], $data['beschreibung'], $data['netto_betrag'],
             $data['ust_satz_id'] ?: null, $ustBetrag, $bruttoBetrag,
             $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null, $data['notizen'],
-            $data['id']
+            $benutzer_id, $data['id']
         ]);
+        
+        if ($result && function_exists('logAction')) {
+            logAction('rechnungen', $data['id'], 'geaendert', 
+                      $data['typ'] . ': ' . $data['kunde_lieferant'] . ' - ' . number_format($bruttoBetrag, 2) . ' €');
+        }
+        return $result;
     } else {
         // Insert
         $stmt = $db->prepare("INSERT INTO rechnungen 
             (typ, rechnungsnummer, buchungsnummer, datum, faellig_am, kunde_lieferant, beschreibung, 
-             netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, kategorie_id, bezahlt, bezahlt_am, notizen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+             netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, kategorie_id, bezahlt, bezahlt_am, notizen, erstellt_von)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
             $data['kunde_lieferant'], $data['beschreibung'], $data['netto_betrag'],
             $data['ust_satz_id'] ?: null, $ustBetrag, $bruttoBetrag,
-            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null, $data['notizen']
+            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null, $data['notizen'],
+            $benutzer_id
         ]);
-        return $db->lastInsertId();
+        $id = $db->lastInsertId();
+        
+        if ($id && function_exists('logAction')) {
+            logAction('rechnungen', $id, 'erstellt', 
+                      $data['typ'] . ': ' . $data['kunde_lieferant'] . ' - ' . number_format($bruttoBetrag, 2) . ' €');
+        }
+        return $id;
     }
 }
 
@@ -281,6 +297,18 @@ function getNextBuchungsnummer($tabelle, $jahr) {
  */
 function deleteRechnung($id) {
     $db = db();
+    
+    // Rechnungsdaten für Protokoll laden
+    if (function_exists('logAction')) {
+        $stmt = $db->prepare("SELECT typ, kunde_lieferant, brutto_betrag FROM rechnungen WHERE id = ?");
+        $stmt->execute([$id]);
+        $rechnung = $stmt->fetch();
+        if ($rechnung) {
+            logAction('rechnungen', $id, 'geloescht', 
+                      $rechnung['typ'] . ': ' . $rechnung['kunde_lieferant'] . ' - ' . number_format($rechnung['brutto_betrag'], 2) . ' €');
+        }
+    }
+    
     $stmt = $db->prepare("DELETE FROM rechnungen WHERE id = ?");
     return $stmt->execute([$id]);
 }

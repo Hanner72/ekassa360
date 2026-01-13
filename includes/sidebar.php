@@ -65,10 +65,32 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
         </h6>
         <ul class="nav flex-column mb-2">
             <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'import' ? 'active' : '' ?>" href="import.php">
+                    <i class="bi bi-file-earmark-excel me-2"></i>Excel-Import
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'kategorien' ? 'active' : '' ?>" href="kategorien.php">
+                    <i class="bi bi-tags me-2"></i>Kategorien
+                </a>
+            </li>
+            <li class="nav-item">
                 <a class="nav-link <?= $currentPage == 'einstellungen' ? 'active' : '' ?>" href="einstellungen.php">
                     <i class="bi bi-gear me-2"></i>Einstellungen
                 </a>
             </li>
+            <?php if (isAdmin()): ?>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'benutzerverwaltung' ? 'active' : '' ?>" href="benutzerverwaltung.php">
+                    <i class="bi bi-people me-2"></i>Benutzerverwaltung
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'protokoll' ? 'active' : '' ?>" href="protokoll.php">
+                    <i class="bi bi-journal-text me-2"></i>Änderungsprotokoll
+                </a>
+            </li>
+            <?php endif; ?>
         </ul>
     </div>
 </nav>
