@@ -65,13 +65,13 @@ function formatDatum($datum) {
 function getStatistics($year) {
     $db = db();
     
-    // Einnahmen
-    $stmt = $db->prepare("SELECT COALESCE(SUM(brutto_betrag), 0) as total FROM rechnungen WHERE typ = 'einnahme' AND YEAR(datum) = ?");
+    // Einnahmen (NETTO - für E/A Rechnung in Österreich)
+    $stmt = $db->prepare("SELECT COALESCE(SUM(netto_betrag), 0) as total FROM rechnungen WHERE typ = 'einnahme' AND YEAR(datum) = ?");
     $stmt->execute([$year]);
     $einnahmen = $stmt->fetch()['total'];
     
-    // Ausgaben
-    $stmt = $db->prepare("SELECT COALESCE(SUM(brutto_betrag), 0) as total FROM rechnungen WHERE typ = 'ausgabe' AND YEAR(datum) = ?");
+    // Ausgaben (NETTO)
+    $stmt = $db->prepare("SELECT COALESCE(SUM(netto_betrag), 0) as total FROM rechnungen WHERE typ = 'ausgabe' AND YEAR(datum) = ?");
     $stmt->execute([$year]);
     $ausgaben = $stmt->fetch()['total'];
     
@@ -91,9 +91,9 @@ function getStatistics($year) {
     
     return [
         'einnahmen' => $einnahmen,
-        'ausgaben' => $ausgaben + $afa,
+        'ausgaben' => $ausgaben + $afa,  // Ausgaben inkl. AfA
         'ust_zahllast' => $ustEinnahmen - $vorsteuer,
-        'gewinn' => $einnahmen - $ausgaben - $afa,
+        'gewinn' => $einnahmen - $ausgaben - $afa,  // Netto-Gewinn
         'afa' => $afa
     ];
 }
@@ -106,13 +106,13 @@ function getMonthlyData($year) {
     $einnahmen = array_fill(0, 12, 0);
     $ausgaben = array_fill(0, 12, 0);
     
-    $stmt = $db->prepare("SELECT MONTH(datum) as monat, SUM(brutto_betrag) as total FROM rechnungen WHERE typ = 'einnahme' AND YEAR(datum) = ? GROUP BY MONTH(datum)");
+    $stmt = $db->prepare("SELECT MONTH(datum) as monat, SUM(netto_betrag) as total FROM rechnungen WHERE typ = 'einnahme' AND YEAR(datum) = ? GROUP BY MONTH(datum)");
     $stmt->execute([$year]);
     foreach ($stmt->fetchAll() as $row) {
         $einnahmen[$row['monat'] - 1] = floatval($row['total']);
     }
     
-    $stmt = $db->prepare("SELECT MONTH(datum) as monat, SUM(brutto_betrag) as total FROM rechnungen WHERE typ = 'ausgabe' AND YEAR(datum) = ? GROUP BY MONTH(datum)");
+    $stmt = $db->prepare("SELECT MONTH(datum) as monat, SUM(netto_betrag) as total FROM rechnungen WHERE typ = 'ausgabe' AND YEAR(datum) = ? GROUP BY MONTH(datum)");
     $stmt->execute([$year]);
     foreach ($stmt->fetchAll() as $row) {
         $ausgaben[$row['monat'] - 1] = floatval($row['total']);
@@ -344,14 +344,29 @@ function getKundenLieferanten() {
 function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     $db = db();
     
+    // Interne DB-Felder für Bemessung und Steuer
+    // Mapping zu offiziellem U30 2025:
+    // KZ 022 (20%): Bemessung in kz022, Steuer in kz029
+    // KZ 029 (10%): Bemessung in kz025, Steuer in kz027
+    // KZ 006 (13%): Bemessung in kz035, Steuer in kz052
     $u30 = [
-        'kz000' => 0, 'kz001' => 0, 'kz021' => 0,
-        'kz022' => 0, 'kz029' => 0,
-        'kz025' => 0, 'kz027' => 0,
-        'kz035' => 0, 'kz052' => 0,
-        'kz060' => 0, 'kz065' => 0, 'kz066' => 0,
-        'kz070' => 0, 'kz071' => 0, 'kz082' => 0,
-        'kz095' => 0, 'zahllast' => 0
+        'kz000' => 0,   // Gesamtbetrag Bemessungsgrundlage
+        'kz001' => 0,   // Eigenverbrauch
+        'kz021' => 0,   // Steuerfrei (ig. Lieferungen)
+        'kz022' => 0,   // Bemessung 20%
+        'kz029' => 0,   // Steuer 20%
+        'kz025' => 0,   // Bemessung 10%
+        'kz027' => 0,   // Steuer 10%
+        'kz035' => 0,   // Bemessung 13%
+        'kz052' => 0,   // Steuer 13%
+        'kz060' => 0,   // Vorsteuer gesamt
+        'kz065' => 0,   // Vorsteuer ig. Erwerb
+        'kz066' => 0,   // Vorsteuer §19
+        'kz070' => 0,   // IG Erwerbe Bemessung
+        'kz071' => 0,   // IG Erwerbe Steuer
+        'kz082' => 0,   // Vorsteuerberichtigung
+        'kz095' => 0,   // Zahllast/Gutschrift
+        'zahllast' => 0
     ];
     
     // Zeitraum bestimmen
@@ -365,31 +380,40 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
         $params = [$jahr, $monat];
     }
     
-    // Einnahmen nach USt-Satz
-    $sql = "SELECT u.u30_kennzahl_bemessung, u.u30_kennzahl_steuer, u.satz,
+    // Einnahmen nach USt-Satz gruppiert
+    $sql = "SELECT u.u30_kennzahl_bemessung, u.satz,
                    SUM(r.netto_betrag) as netto, SUM(r.ust_betrag) as ust
             FROM rechnungen r
             LEFT JOIN ust_saetze u ON r.ust_satz_id = u.id
             WHERE r.typ = 'einnahme' AND $datumFilter
-            GROUP BY u.id";
+            GROUP BY u.u30_kennzahl_bemessung, u.satz";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     
     $gesamtLieferungen = 0;
     foreach ($stmt->fetchAll() as $row) {
-        $gesamtLieferungen += $row['netto'];
+        $netto = $row['netto'] ?? 0;
+        $ust = $row['ust'] ?? 0;
+        $kz = $row['u30_kennzahl_bemessung'] ?? '';
         
-        if ($row['u30_kennzahl_bemessung']) {
-            $kzBem = 'kz' . $row['u30_kennzahl_bemessung'];
-            if (isset($u30[$kzBem])) {
-                $u30[$kzBem] += $row['netto'];
-            }
-        }
-        if ($row['u30_kennzahl_steuer']) {
-            $kzSt = 'kz' . $row['u30_kennzahl_steuer'];
-            if (isset($u30[$kzSt])) {
-                $u30[$kzSt] += $row['ust'];
-            }
+        $gesamtLieferungen += $netto;
+        
+        // Mapping: Offizielle KZ → Interne DB-Felder
+        if ($kz == '022') {
+            // 20% → Bemessung in kz022, Steuer in kz029
+            $u30['kz022'] += $netto;
+            $u30['kz029'] += $ust;
+        } elseif ($kz == '029') {
+            // 10% → Bemessung in kz025, Steuer in kz027
+            $u30['kz025'] += $netto;
+            $u30['kz027'] += $ust;
+        } elseif ($kz == '006') {
+            // 13% → Bemessung in kz035, Steuer in kz052
+            $u30['kz035'] += $netto;
+            $u30['kz052'] += $ust;
+        } elseif ($kz == '021') {
+            // Innergemeinschaftlich steuerfrei
+            $u30['kz021'] += $netto;
         }
     }
     $u30['kz000'] = $gesamtLieferungen;
@@ -415,7 +439,7 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     
     $u30['kz060'] = $vorsteuerRechnungen + $vorsteuerAnlagen;
     
-    // Zahllast berechnen
+    // Zahllast berechnen: Summe aller Steuerbeträge - Vorsteuer
     $ustGesamt = $u30['kz029'] + $u30['kz027'] + $u30['kz052'] + $u30['kz071'];
     $vorsteuerGesamt = $u30['kz060'] + $u30['kz065'] + $u30['kz066'];
     $u30['zahllast'] = $ustGesamt - $vorsteuerGesamt;

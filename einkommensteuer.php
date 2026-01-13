@@ -252,7 +252,7 @@ if ($action === 'view' || $action === 'edit' || $action === 'new') {
 
                     <!-- Firmendaten -->
                     <div class="card mb-4 <?= $readonly ? 'border-success' : '' ?>">
-                        <div class="card-header <?= $readonly ? 'bg-success text-white' : '' ?>">
+                        <div class="card-header">
                             <div class="d-flex justify-content-between align-items-center">
                                 <h5 class="mb-0">E1a - Beilage zur Einkommensteuererklärung <?= $jahr ?></h5>
                                 <?php if ($readonly && $gespeichert['eingereicht_am']): ?>
@@ -277,7 +277,7 @@ if ($action === 'view' || $action === 'edit' || $action === 'new') {
 
                     <!-- Betriebseinnahmen -->
                     <div class="card mb-4">
-                        <div class="card-header bg-success text-white">
+                        <div class="card-header">
                             <h5 class="mb-0"><i class="bi bi-arrow-down-circle me-2"></i>Betriebseinnahmen</h5>
                         </div>
                         <div class="card-body">
@@ -321,7 +321,7 @@ if ($action === 'view' || $action === 'edit' || $action === 'new') {
 
                     <!-- Betriebsausgaben -->
                     <div class="card mb-4">
-                        <div class="card-header bg-danger text-white">
+                        <div class="card-header">
                             <h5 class="mb-0"><i class="bi bi-arrow-up-circle me-2"></i>Betriebsausgaben</h5>
                         </div>
                         <div class="card-body">
@@ -455,7 +455,7 @@ if ($action === 'view' || $action === 'edit' || $action === 'new') {
 
                     <!-- Ergebnis -->
                     <div class="card mb-4 <?= $e1a['gewinn_verlust'] >= 0 ? 'border-success' : 'border-danger' ?>">
-                        <div class="card-header <?= $e1a['gewinn_verlust'] >= 0 ? 'bg-success' : 'bg-danger' ?> text-white">
+                        <div class="card-header">
                             <h5 class="mb-0">
                                 <i class="bi bi-<?= $e1a['gewinn_verlust'] >= 0 ? 'graph-up-arrow' : 'graph-down-arrow' ?> me-2"></i>
                                 <?= $e1a['gewinn_verlust'] >= 0 ? 'Gewinn' : 'Verlust' ?>

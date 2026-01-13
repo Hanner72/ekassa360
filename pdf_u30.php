@@ -173,20 +173,20 @@ $pdf->Cell(45, 6, 'Steuer', 1, 1, 'C', true);
 
 $pdf->SetFont('Arial', '', 9);
 
-// 20%
-$pdf->Cell(15, 7, '022/029', 1, 0, 'C');
+// 20% - Offizielle KZ 022, intern: Bemessung kz022, Steuer kz029
+$pdf->Cell(15, 7, '022', 1, 0, 'C');
 $pdf->Cell(85, 7, ' 20% Normalsteuersatz', 1, 0, 'L');
 $pdf->Cell(45, 7, number_format($u30['kz022'], 2, ',', '.') . ' EUR', 1, 0, 'R');
 $pdf->Cell(45, 7, number_format($u30['kz029'], 2, ',', '.') . ' EUR', 1, 1, 'R');
 
-// 10%
-$pdf->Cell(15, 7, '025/027', 1, 0, 'C');
+// 10% - Offizielle KZ 029, intern: Bemessung kz025, Steuer kz027
+$pdf->Cell(15, 7, '029', 1, 0, 'C');
 $pdf->Cell(85, 7, ' 10% ermaessigt', 1, 0, 'L');
 $pdf->Cell(45, 7, number_format($u30['kz025'], 2, ',', '.') . ' EUR', 1, 0, 'R');
 $pdf->Cell(45, 7, number_format($u30['kz027'], 2, ',', '.') . ' EUR', 1, 1, 'R');
 
-// 13%
-$pdf->Cell(15, 7, '035/052', 1, 0, 'C');
+// 13% - Offizielle KZ 006, intern: Bemessung kz035, Steuer kz052
+$pdf->Cell(15, 7, '006', 1, 0, 'C');
 $pdf->Cell(85, 7, ' 13% ermaessigt', 1, 0, 'L');
 $pdf->Cell(45, 7, number_format($u30['kz035'], 2, ',', '.') . ' EUR', 1, 0, 'R');
 $pdf->Cell(45, 7, number_format($u30['kz052'], 2, ',', '.') . ' EUR', 1, 1, 'R');

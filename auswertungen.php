@@ -20,6 +20,12 @@ if (empty($verfuegbareJahre)) {
     $verfuegbareJahre = [date('Y')];
 }
 
+// AfA für das Jahr laden (vor Monatsdaten, damit wir anteilig rechnen können)
+$stmtAfa = $db->prepare("SELECT COALESCE(SUM(afa_betrag), 0) as total FROM afa_buchungen WHERE jahr = ?");
+$stmtAfa->execute([$jahr]);
+$afaJahr = $stmtAfa->fetch()['total'];
+$afaMonatlich = $afaJahr / 12;  // Anteilige AfA pro Monat
+
 // Monatliche Übersicht
 $monatsDaten = [];
 for ($m = 1; $m <= 12; $m++) {
@@ -34,7 +40,8 @@ for ($m = 1; $m <= 12; $m++) {
     ");
     $stmtMonat->execute([$jahr, $m]);
     $daten = $stmtMonat->fetch(PDO::FETCH_ASSOC);
-    $daten['gewinn'] = $daten['einnahmen'] - $daten['ausgaben'];
+    $daten['afa'] = $afaMonatlich;  // Anteilige AfA pro Monat
+    $daten['gewinn'] = $daten['einnahmen'] - $daten['ausgaben'] - $afaMonatlich;  // Mit AfA
     $daten['ust_zahllast'] = $daten['ust_einnahmen'] - $daten['vorsteuer'];
     $monatsDaten[$m] = $daten;
 }
@@ -45,8 +52,9 @@ $jahresSummen = [
     'ausgaben' => array_sum(array_column($monatsDaten, 'ausgaben')),
     'ust_einnahmen' => array_sum(array_column($monatsDaten, 'ust_einnahmen')),
     'vorsteuer' => array_sum(array_column($monatsDaten, 'vorsteuer')),
+    'afa' => $afaJahr,
 ];
-$jahresSummen['gewinn'] = $jahresSummen['einnahmen'] - $jahresSummen['ausgaben'];
+$jahresSummen['gewinn'] = $jahresSummen['einnahmen'] - $jahresSummen['ausgaben'] - $afaJahr;
 $jahresSummen['ust_zahllast'] = $jahresSummen['ust_einnahmen'] - $jahresSummen['vorsteuer'];
 
 // Kategorieauswertung
@@ -99,7 +107,14 @@ for ($j = $jahr - 2; $j <= $jahr; $j++) {
     ");
     $stmtVergleich->execute([$j]);
     $vergleichDaten = $stmtVergleich->fetch(PDO::FETCH_ASSOC);
-    $vergleichDaten['gewinn'] = $vergleichDaten['einnahmen'] - $vergleichDaten['ausgaben'];
+    
+    // AfA für das Vergleichsjahr
+    $stmtAfaVergleich = $db->prepare("SELECT COALESCE(SUM(afa_betrag), 0) as total FROM afa_buchungen WHERE jahr = ?");
+    $stmtAfaVergleich->execute([$j]);
+    $afaVergleich = $stmtAfaVergleich->fetch()['total'];
+    
+    $vergleichDaten['afa'] = $afaVergleich;
+    $vergleichDaten['gewinn'] = $vergleichDaten['einnahmen'] - $vergleichDaten['ausgaben'] - $afaVergleich;
     $jahresVergleich[$j] = $vergleichDaten;
 }
 
@@ -220,8 +235,11 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                             <div class="col-md-3">
                                 <div class="card bg-danger text-white">
                                     <div class="card-body">
-                                        <h6 class="card-subtitle mb-2">Ausgaben (netto)</h6>
-                                        <h3 class="card-title mb-0"><?= formatBetrag($jahresSummen['ausgaben']) ?></h3>
+                                        <h6 class="card-subtitle mb-2">Ausgaben + AfA</h6>
+                                        <h3 class="card-title mb-0"><?= formatBetrag($jahresSummen['ausgaben'] + $jahresSummen['afa']) ?></h3>
+                                        <?php if ($jahresSummen['afa'] > 0): ?>
+                                        <small class="opacity-75">davon AfA: <?= formatBetrag($jahresSummen['afa']) ?></small>
+                                        <?php endif; ?>
                                     </div>
                                 </div>
                             </div>
@@ -333,6 +351,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                                                 <th>Monat</th>
                                                 <th class="text-end">Einnahmen</th>
                                                 <th class="text-end">Ausgaben</th>
+                                                <th class="text-end">AfA</th>
                                                 <th class="text-end">Gewinn/Verlust</th>
                                                 <th class="text-end">USt</th>
                                                 <th class="text-end">Vorsteuer</th>
@@ -345,6 +364,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                                                     <td><?= $monate[$m] ?></td>
                                                     <td class="text-end text-success"><?= formatBetrag($daten['einnahmen']) ?></td>
                                                     <td class="text-end text-danger"><?= formatBetrag($daten['ausgaben']) ?></td>
+                                                    <td class="text-end text-muted"><?= formatBetrag($daten['afa']) ?></td>
                                                     <td class="text-end <?= $daten['gewinn'] >= 0 ? 'text-success' : 'text-danger' ?>">
                                                         <strong><?= formatBetrag($daten['gewinn']) ?></strong>
                                                     </td>
@@ -361,6 +381,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                                                 <th>Gesamt</th>
                                                 <th class="text-end"><?= formatBetrag($jahresSummen['einnahmen']) ?></th>
                                                 <th class="text-end"><?= formatBetrag($jahresSummen['ausgaben']) ?></th>
+                                                <th class="text-end"><?= formatBetrag($jahresSummen['afa']) ?></th>
                                                 <th class="text-end"><?= formatBetrag($jahresSummen['gewinn']) ?></th>
                                                 <th class="text-end"><?= formatBetrag($jahresSummen['ust_einnahmen']) ?></th>
                                                 <th class="text-end"><?= formatBetrag($jahresSummen['vorsteuer']) ?></th>
@@ -369,6 +390,10 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                                         </tfoot>
                                     </table>
                                 </div>
+                                <p class="text-muted small mt-2 mb-0">
+                                    <i class="bi bi-info-circle me-1"></i>
+                                    Gewinn = Einnahmen − Ausgaben − AfA (anteilig <?= formatBetrag($afaJahr / 12) ?>/Monat)
+                                </p>
                             </div>
                         </div>
                     </div>
@@ -378,7 +403,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="card mb-4">
-                                    <div class="card-header bg-success text-white">
+                                    <div class="card-header">
                                         <h5 class="mb-0"><i class="bi bi-arrow-down-circle me-2"></i>Einnahmen nach Kategorien</h5>
                                     </div>
                                     <div class="card-body">
@@ -407,7 +432,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                                                 endforeach; 
                                                 ?>
                                             </tbody>
-                                            <tfoot class="table-success">
+                                            <tfoot class="table-primary">
                                                 <tr>
                                                     <th>Gesamt</th>
                                                     <th></th>
@@ -420,7 +445,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                             </div>
                             <div class="col-md-6">
                                 <div class="card mb-4">
-                                    <div class="card-header bg-danger text-white">
+                                    <div class="card-header">
                                         <h5 class="mb-0"><i class="bi bi-arrow-up-circle me-2"></i>Ausgaben nach Kategorien</h5>
                                     </div>
                                     <div class="card-body">
@@ -449,7 +474,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                                                 endforeach; 
                                                 ?>
                                             </tbody>
-                                            <tfoot class="table-danger">
+                                            <tfoot class="table-primary">
                                                 <tr>
                                                     <th>Gesamt</th>
                                                     <th></th>
@@ -473,7 +498,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                         <div class="row">
                             <div class="col-md-6">
                                 <div class="card mb-4">
-                                    <div class="card-header bg-success text-white">
+                                    <div class="card-header">
                                         <h5 class="mb-0"><i class="bi bi-person-check me-2"></i>Top 10 Kunden</h5>
                                     </div>
                                     <div class="card-body">
@@ -506,7 +531,7 @@ $monate = ['', 'Jänner', 'Februar', 'März', 'April', 'Mai', 'Juni', 'Juli', 'A
                             </div>
                             <div class="col-md-6">
                                 <div class="card mb-4">
-                                    <div class="card-header bg-danger text-white">
+                                    <div class="card-header">
                                         <h5 class="mb-0"><i class="bi bi-truck me-2"></i>Top 10 Lieferanten</h5>
                                     </div>
                                     <div class="card-body">

@@ -202,8 +202,8 @@ $kategorieOptionen = ['EDV', 'Einrichtung', 'Maschinen', 'Fahrzeuge', 'Werkzeuge
 
                             <!-- AfA-Methoden Erklärung -->
                             <div class="collapse mb-3" id="afaInfo">
-                                <div class="card card-body bg-light border-info">
-                                    <h6 class="text-info mb-3"><i class="bi bi-info-circle me-2"></i>AfA-Methoden erklärt</h6>
+                                <div class="card card-body bg-light">
+                                    <h6 class="text-primary mb-3"><i class="bi bi-info-circle me-2"></i>AfA-Methoden erklärt</h6>
                                     <div class="row">
                                         <div class="col-md-6">
                                             <h6 class="fw-bold"><i class="bi bi-arrow-right me-1"></i>Lineare Abschreibung</h6>
@@ -297,7 +297,7 @@ $kategorieOptionen = ['EDV', 'Einrichtung', 'Maschinen', 'Fahrzeuge', 'Werkzeuge
                                 if (!empty($afaBuchungen)):
                             ?>
                             <div class="card mt-3">
-                                <div class="card-header bg-light">
+                                <div class="card-header">
                                     <h6 class="mb-0"><i class="bi bi-graph-down me-2"></i>AfA-Verlauf</h6>
                                 </div>
                                 <div class="card-body p-0">

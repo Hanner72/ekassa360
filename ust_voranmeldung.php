@@ -189,7 +189,8 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                                     </thead>
                                     <tbody>
                                         <?php foreach ($alleMeldungen as $m): 
-                                            $ustGesamt = $m['kz029'] + $m['kz027'] + $m['kz052'];
+                                            // USt = Zahllast + Vorsteuer (immer korrekt)
+                                            $ustGesamt = $m['zahllast'] + $m['kz060'];
                                             $zeitraumText = $m['zeitraum_typ'] == 'quartal' 
                                                 ? $quartalsnamen[$m['monat']] . ' ' . $m['jahr']
                                                 : $monatsnamen[$m['monat']] . ' ' . $m['jahr'];
@@ -292,7 +293,7 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
 
                     <!-- Zeitraum Info -->
                     <div class="card mb-4 <?= $readonly ? 'border-success' : '' ?>">
-                        <div class="card-header <?= $readonly ? 'bg-success text-white' : '' ?>">
+                        <div class="card-header">
                             <div class="d-flex justify-content-between align-items-center">
                                 <h5 class="mb-0">
                                     <?= $zeitraumTyp == 'quartal' ? $quartalsnamen[$monat] : $monatsnamen[$monat] ?> <?= $jahr ?>
@@ -354,25 +355,27 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                             <h5 class="mb-0">Berechnung der Umsatzsteuer</h5>
                         </div>
                         <div class="card-body">
+                            <p class="text-muted small mb-3">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Kennzahlen gemäß U30-Formular 2025
+                            </p>
                             <table class="table">
                                 <thead class="table-light">
                                     <tr>
                                         <th>Steuersatz</th>
-                                        <th class="text-center">KZ Bemessung</th>
+                                        <th class="text-center">KZ</th>
                                         <th>Bemessungsgrundlage</th>
-                                        <th class="text-center">KZ Steuer</th>
-                                        <th>Steuer</th>
+                                        <th>Umsatzsteuer</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <tr>
                                         <td><strong>20%</strong> Normalsteuersatz</td>
-                                        <td class="text-center">022</td>
+                                        <td class="text-center"><strong>022</strong></td>
                                         <td>
                                             <input type="number" step="0.01" class="form-control text-end" name="kz022" 
                                                    value="<?= number_format($u30['kz022'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
                                         </td>
-                                        <td class="text-center">029</td>
                                         <td>
                                             <input type="number" step="0.01" class="form-control text-end" name="kz029" 
                                                    value="<?= number_format($u30['kz029'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
@@ -380,12 +383,11 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                                     </tr>
                                     <tr>
                                         <td><strong>10%</strong> ermäßigt</td>
-                                        <td class="text-center">025</td>
+                                        <td class="text-center"><strong>029</strong></td>
                                         <td>
                                             <input type="number" step="0.01" class="form-control text-end" name="kz025" 
                                                    value="<?= number_format($u30['kz025'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
                                         </td>
-                                        <td class="text-center">027</td>
                                         <td>
                                             <input type="number" step="0.01" class="form-control text-end" name="kz027" 
                                                    value="<?= number_format($u30['kz027'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
@@ -393,12 +395,11 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                                     </tr>
                                     <tr>
                                         <td><strong>13%</strong> ermäßigt</td>
-                                        <td class="text-center">035</td>
+                                        <td class="text-center"><strong>006</strong></td>
                                         <td>
                                             <input type="number" step="0.01" class="form-control text-end" name="kz035" 
                                                    value="<?= number_format($u30['kz035'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
                                         </td>
-                                        <td class="text-center">052</td>
                                         <td>
                                             <input type="number" step="0.01" class="form-control text-end" name="kz052" 
                                                    value="<?= number_format($u30['kz052'], 2, '.', '') ?>" <?= $readonly ? 'readonly' : '' ?>>
@@ -428,8 +429,11 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                     </div>
 
                     <!-- Ergebnis -->
+                    <?php 
+                    $ustGesamt = ($u30['kz029'] ?? 0) + ($u30['kz027'] ?? 0) + ($u30['kz052'] ?? 0);
+                    ?>
                     <div class="card mb-4 <?= ($u30['zahllast'] ?? 0) >= 0 ? 'border-danger' : 'border-success' ?>">
-                        <div class="card-header <?= ($u30['zahllast'] ?? 0) >= 0 ? 'bg-danger' : 'bg-success' ?> text-white">
+                        <div class="card-header">
                             <h5 class="mb-0">
                                 <?= ($u30['zahllast'] ?? 0) >= 0 ? 'Zahllast' : 'Gutschrift' ?> (KZ 095)
                             </h5>
@@ -438,7 +442,7 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                             <div class="row align-items-center">
                                 <div class="col-md-8">
                                     <p class="mb-0">
-                                        USt (<?= formatBetrag(($u30['kz029'] ?? 0) + ($u30['kz027'] ?? 0) + ($u30['kz052'] ?? 0)) ?>)
+                                        USt (<?= formatBetrag($ustGesamt) ?>)
                                         − Vorsteuer (<?= formatBetrag($u30['kz060'] ?? 0) ?>)
                                     </p>
                                 </div>
