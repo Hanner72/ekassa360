@@ -1,0 +1,14 @@
+{
+    "name": "ekassa360/buchhaltung",
+    "description": "EKassa360 - Buchhaltung für Österreich",
+    "type": "project",
+    "require": {
+        "php": ">=7.4",
+        "phpoffice/phpspreadsheet": "^1.29"
+    },
+    "autoload": {
+        "psr-4": {
+            "EKassa360\\": "src/"
+        }
+    }
+}

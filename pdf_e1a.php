@@ -8,6 +8,9 @@
 session_start();
 require_once 'config/database.php';
 require_once 'includes/functions.php';
+require_once 'includes/auth.php';
+
+requireLogin();
 
 // FPDF einbinden
 if (file_exists('lib/fpdf/fpdf.php')) {
@@ -175,7 +178,18 @@ $pdf->Ln(2);
 $pdf->KennzahlRow('9040', 'Erloese aus Lieferungen und Leistungen (Waren, Erzeugnisse)', $e1a['kz9040'], 'einnahme');
 $pdf->KennzahlRow('9050', 'Erloese aus Dienstleistungen', $e1a['kz9050'], 'einnahme');
 
-$summeEinnahmen = $e1a['kz9040'] + $e1a['kz9050'];
+$summeEinnahmen = $e1a['_summe_einnahmen'] ?? ($e1a['kz9040'] + $e1a['kz9050']);
+
+// Weitere Einnahmen-Kennzahlen anzeigen
+$standardEinnahmen = ['9040', '9050'];
+if (isset($e1a['_einnahmen_kz'])) {
+    foreach ($e1a['_einnahmen_kz'] as $kz) {
+        if (!in_array($kz, $standardEinnahmen) && ($e1a['kz' . $kz] ?? 0) > 0) {
+            $pdf->KennzahlRow($kz, 'Sonstige Einnahmen (KZ ' . $kz . ')', $e1a['kz' . $kz], 'einnahme');
+        }
+    }
+}
+
 $pdf->Ln(2);
 $pdf->SummenRow('Summe Betriebseinnahmen', $summeEinnahmen, 'einnahme');
 
@@ -199,7 +213,17 @@ $pdf->KennzahlRow('9135', '  AfA Gebaeude beschleunigt (§ 8 Abs. 1a)', $e1a['kz
 $pdf->KennzahlRow('9140', 'Betriebsraeumlichkeiten (Miete, BK)', $e1a['kz9140'], 'ausgabe');
 $pdf->KennzahlRow('9150', 'Sonstige Betriebsausgaben', $e1a['kz9150'], 'ausgabe');
 
-$summeAusgaben = $e1a['kz9100'] + $e1a['kz9110'] + $e1a['kz9120'] + $e1a['kz9130'] + ($e1a['kz9134'] ?? 0) + ($e1a['kz9135'] ?? 0) + $e1a['kz9140'] + $e1a['kz9150'];
+// Weitere Ausgaben-Kennzahlen anzeigen
+$standardAusgaben = ['9100', '9110', '9120', '9130', '9134', '9135', '9140', '9150'];
+if (isset($e1a['_ausgaben_kz'])) {
+    foreach ($e1a['_ausgaben_kz'] as $kz) {
+        if (!in_array($kz, $standardAusgaben) && ($e1a['kz' . $kz] ?? 0) > 0) {
+            $pdf->KennzahlRow($kz, 'Sonstige Ausgaben (KZ ' . $kz . ')', $e1a['kz' . $kz], 'ausgabe');
+        }
+    }
+}
+
+$summeAusgaben = $e1a['_summe_ausgaben'] ?? ($e1a['kz9100'] + $e1a['kz9110'] + $e1a['kz9120'] + $e1a['kz9130'] + ($e1a['kz9134'] ?? 0) + ($e1a['kz9135'] ?? 0) + $e1a['kz9140'] + $e1a['kz9150']);
 $pdf->Ln(2);
 $pdf->SummenRow('Summe Betriebsausgaben', $summeAusgaben, 'ausgabe');
 

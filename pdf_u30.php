@@ -10,6 +10,9 @@
 session_start();
 require_once 'config/database.php';
 require_once 'includes/functions.php';
+require_once 'includes/auth.php';
+
+requireLogin();
 
 // FPDF einbinden - passe den Pfad an!
 if (file_exists('lib/fpdf/fpdf.php')) {
@@ -191,32 +194,60 @@ $pdf->Cell(85, 7, ' 13% ermaessigt', 1, 0, 'L');
 $pdf->Cell(45, 7, number_format($u30['kz035'], 2, ',', '.') . ' EUR', 1, 0, 'R');
 $pdf->Cell(45, 7, number_format($u30['kz052'], 2, ',', '.') . ' EUR', 1, 1, 'R');
 
-// Summe USt
+// Summe USt (ohne igE, da diese separat ausgewiesen wird)
 $ustGesamt = ($u30['kz029'] ?? 0) + ($u30['kz027'] ?? 0) + ($u30['kz052'] ?? 0);
 $pdf->SetFont('Arial', 'B', 9);
 $pdf->SetFillColor(230, 240, 250);
-$pdf->Cell(100, 7, ' Summe Umsatzsteuer', 1, 0, 'L', true);
+$pdf->Cell(100, 7, ' Summe Umsatzsteuer (Inland)', 1, 0, 'L', true);
 $pdf->Cell(45, 7, '', 1, 0, 'C', true);
 $pdf->Cell(45, 7, number_format($ustGesamt, 2, ',', '.') . ' EUR', 1, 1, 'R', true);
 
 $pdf->Ln(5);
 
+// Innergemeinschaftliche Erwerbe (igE)
+if (($u30['kz070'] ?? 0) > 0) {
+    $pdf->SectionHeader('Innergemeinschaftliche Erwerbe (igE)');
+    $pdf->Ln(2);
+    
+    $pdf->KennzahlRow('070', 'Erwerbe aus EU-Mitgliedstaaten (Bemessung)', $u30['kz070'], true);
+    $pdf->KennzahlRow('072', 'Erwerbsteuer 20% (geschuldet)', $u30['kz072'] ?? 0);
+    
+    $pdf->SetFont('Arial', 'I', 8);
+    $pdf->SetTextColor(100, 100, 100);
+    $pdf->Cell(0, 5, 'Hinweis: Die Erwerbsteuer wird durch die Vorsteuer KZ 065 ausgeglichen (Nullsumme).', 0, 1, 'L');
+    $pdf->SetTextColor(0, 0, 0);
+    
+    $pdf->Ln(3);
+}
+
 // Vorsteuer
 $pdf->SectionHeader('Vorsteuer');
 $pdf->Ln(2);
 
-$pdf->KennzahlRow('060', 'Gesamtbetrag der Vorsteuer', $u30['kz060'], true);
+$pdf->KennzahlRow('060', 'Vorsteuer aus Inlandsrechnungen', $u30['kz060'], true);
+if (($u30['kz061'] ?? 0) > 0) {
+    $pdf->KennzahlRow('061', 'Einfuhr-USt (Drittland-Importe)', $u30['kz061']);
+}
 if (($u30['kz065'] ?? 0) > 0) {
     $pdf->KennzahlRow('065', 'Vorsteuer aus ig. Erwerb', $u30['kz065']);
 }
 if (($u30['kz066'] ?? 0) > 0) {
-    $pdf->KennzahlRow('066', 'Einfuhrumsatzsteuer', $u30['kz066']);
+    $pdf->KennzahlRow('066', 'Vorsteuer § 19 Abs. 1 zweiter Satz', $u30['kz066']);
 }
+
+// Vorsteuer Summe
+$vorsteuerGesamt = ($u30['kz060'] ?? 0) + ($u30['kz061'] ?? 0) + ($u30['kz065'] ?? 0) + ($u30['kz066'] ?? 0);
+$pdf->SetFont('Arial', 'B', 9);
+$pdf->SetFillColor(230, 240, 250);
+$pdf->Cell(15, 7, '', 1, 0, 'C', true);
+$pdf->Cell(130, 7, ' Summe Vorsteuer', 1, 0, 'L', true);
+$pdf->Cell(45, 7, number_format($vorsteuerGesamt, 2, ',', '.') . ' EUR', 1, 1, 'R', true);
 
 $pdf->Ln(8);
 
-// Ergebnis
-$zahllast = $u30['zahllast'] ?? 0;
+// Ergebnis - inkl. Erwerbsteuer aus igE
+$ustGesamtMitIgE = $ustGesamt + ($u30['kz072'] ?? 0);
+$zahllast = $ustGesamtMitIgE - $vorsteuerGesamt;
 $isZahllast = $zahllast >= 0;
 
 $pdf->SectionHeader($isZahllast ? 'Zahllast (KZ 095)' : 'Gutschrift (KZ 095)');
@@ -232,7 +263,12 @@ $pdf->ResultRow(
 $pdf->Ln(5);
 $pdf->SetFont('Arial', 'I', 9);
 $pdf->SetTextColor(100, 100, 100);
-$pdf->MultiCell(0, 5, 'Berechnung: USt (' . number_format($ustGesamt, 2, ',', '.') . ' EUR) - Vorsteuer (' . number_format($u30['kz060'], 2, ',', '.') . ' EUR) = ' . number_format($zahllast, 2, ',', '.') . ' EUR');
+$berechnungText = 'Berechnung: USt Inland (' . number_format($ustGesamt, 2, ',', '.') . ')';
+if (($u30['kz072'] ?? 0) > 0) {
+    $berechnungText .= ' + Erwerbsteuer igE (' . number_format($u30['kz072'], 2, ',', '.') . ')';
+}
+$berechnungText .= ' - Vorsteuer (' . number_format($vorsteuerGesamt, 2, ',', '.') . ') = ' . number_format($zahllast, 2, ',', '.') . ' EUR';
+$pdf->MultiCell(0, 5, $berechnungText);
 
 // Status
 if ($gespeichert && $gespeichert['eingereicht']) {

@@ -6,6 +6,9 @@
 session_start();
 require_once 'config/database.php';
 require_once 'includes/functions.php';
+require_once 'includes/auth.php';
+
+requireLogin();
 
 $action = $_GET['action'] ?? 'list';
 
@@ -311,11 +314,43 @@ if ($action === 'view' || $action === 'edit' || $action === 'new') {
                                         <div class="input-group">
                                             <span class="input-group-text">€</span>
                                             <input type="text" class="form-control text-end fw-bold" id="summeEinnahmen" 
-                                                   value="<?= number_format($e1a['kz9040'] + $e1a['kz9050'], 2, ',', '.') ?>" readonly>
+                                                   value="<?= number_format($e1a['_summe_einnahmen'] ?? ($e1a['kz9040'] + $e1a['kz9050']), 2, ',', '.') ?>" readonly>
                                         </div>
                                     </td>
                                 </tr>
                             </table>
+                            
+                            <?php 
+                            // Weitere Einnahmen-Kennzahlen (benutzerdefiniert)
+                            $standardEinnahmen = ['9040', '9050'];
+                            $weitereEinnahmen = [];
+                            if (isset($e1a['_einnahmen_kz'])) {
+                                foreach ($e1a['_einnahmen_kz'] as $kz) {
+                                    if (!in_array($kz, $standardEinnahmen) && ($e1a['kz' . $kz] ?? 0) > 0) {
+                                        $weitereEinnahmen[$kz] = $e1a['kz' . $kz];
+                                    }
+                                }
+                            }
+                            if (!empty($weitereEinnahmen)): ?>
+                            <div class="mt-3">
+                                <h6 class="text-muted"><i class="bi bi-plus-circle me-1"></i>Weitere Einnahmen-Kennzahlen</h6>
+                                <table class="table table-sm">
+                                    <?php foreach ($weitereEinnahmen as $kz => $wert): ?>
+                                    <tr>
+                                        <td width="70%">Kennzahl <?= $kz ?></td>
+                                        <td width="10%" class="text-center"><strong>KZ <?= $kz ?></strong></td>
+                                        <td width="20%">
+                                            <div class="input-group input-group-sm">
+                                                <span class="input-group-text">€</span>
+                                                <input type="text" class="form-control text-end" 
+                                                       value="<?= number_format($wert, 2, ',', '.') ?>" readonly>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </table>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
 
@@ -445,11 +480,43 @@ if ($action === 'view' || $action === 'edit' || $action === 'new') {
                                         <div class="input-group">
                                             <span class="input-group-text">€</span>
                                             <input type="text" class="form-control text-end fw-bold" id="summeAusgaben" 
-                                                   value="<?= number_format($e1a['kz9100'] + $e1a['kz9110'] + $e1a['kz9120'] + $e1a['kz9130'] + ($e1a['kz9134'] ?? 0) + ($e1a['kz9135'] ?? 0) + $e1a['kz9140'] + $e1a['kz9150'], 2, ',', '.') ?>" readonly>
+                                                   value="<?= number_format($e1a['_summe_ausgaben'] ?? ($e1a['kz9100'] + $e1a['kz9110'] + $e1a['kz9120'] + $e1a['kz9130'] + ($e1a['kz9134'] ?? 0) + ($e1a['kz9135'] ?? 0) + $e1a['kz9140'] + $e1a['kz9150']), 2, ',', '.') ?>" readonly>
                                         </div>
                                     </td>
                                 </tr>
                             </table>
+                            
+                            <?php 
+                            // Weitere Ausgaben-Kennzahlen (benutzerdefiniert)
+                            $standardAusgaben = ['9100', '9110', '9120', '9130', '9134', '9135', '9140', '9150'];
+                            $weitereAusgaben = [];
+                            if (isset($e1a['_ausgaben_kz'])) {
+                                foreach ($e1a['_ausgaben_kz'] as $kz) {
+                                    if (!in_array($kz, $standardAusgaben) && ($e1a['kz' . $kz] ?? 0) > 0) {
+                                        $weitereAusgaben[$kz] = $e1a['kz' . $kz];
+                                    }
+                                }
+                            }
+                            if (!empty($weitereAusgaben)): ?>
+                            <div class="mt-3">
+                                <h6 class="text-muted"><i class="bi bi-plus-circle me-1"></i>Weitere Ausgaben-Kennzahlen</h6>
+                                <table class="table table-sm">
+                                    <?php foreach ($weitereAusgaben as $kz => $wert): ?>
+                                    <tr>
+                                        <td width="70%">Kennzahl <?= $kz ?></td>
+                                        <td width="10%" class="text-center"><strong>KZ <?= $kz ?></strong></td>
+                                        <td width="20%">
+                                            <div class="input-group input-group-sm">
+                                                <span class="input-group-text">€</span>
+                                                <input type="text" class="form-control text-end" 
+                                                       value="<?= number_format($wert, 2, ',', '.') ?>" readonly>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                    <?php endforeach; ?>
+                                </table>
+                            </div>
+                            <?php endif; ?>
                         </div>
                     </div>
 

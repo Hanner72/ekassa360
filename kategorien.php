@@ -5,6 +5,9 @@
 
 require_once 'config/database.php';
 require_once 'includes/functions.php';
+require_once 'includes/auth.php';
+
+requireLogin();
 
 $db = Database::getInstance()->getConnection();
 
