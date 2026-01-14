@@ -552,13 +552,13 @@ function saveUstVoranmeldung($data) {
     if ($existing) {
         $stmt = $db->prepare("UPDATE ust_voranmeldungen SET 
             kz000 = ?, kz001 = ?, kz021 = ?, kz022 = ?, kz029 = ?, kz025 = ?, kz027 = ?,
-            kz035 = ?, kz052 = ?, kz060 = ?, kz065 = ?, kz066 = ?, kz070 = ?, kz071 = ?,
+            kz035 = ?, kz052 = ?, kz060 = ?, kz061 = ?, kz065 = ?, kz066 = ?, kz070 = ?, kz072 = ?,
             kz082 = ?, kz095 = ?, zahllast = ?, eingereicht = ?, eingereicht_am = ?, notizen = ?
             WHERE id = ?");
         return $stmt->execute([
             $data['kz000'], $data['kz001'], $data['kz021'], $data['kz022'], $data['kz029'],
             $data['kz025'], $data['kz027'], $data['kz035'], $data['kz052'],
-            $data['kz060'], $data['kz065'], $data['kz066'], $data['kz070'], $data['kz071'],
+            $data['kz060'], $data['kz061'] ?? 0, $data['kz065'], $data['kz066'], $data['kz070'], $data['kz072'] ?? 0,
             $data['kz082'], $data['kz095'], $data['zahllast'],
             $data['eingereicht'] ?? 0, $data['eingereicht_am'] ?? null, $data['notizen'] ?? null,
             $existing['id']
@@ -566,13 +566,13 @@ function saveUstVoranmeldung($data) {
     } else {
         $stmt = $db->prepare("INSERT INTO ust_voranmeldungen 
             (jahr, monat, zeitraum_typ, kz000, kz001, kz021, kz022, kz029, kz025, kz027,
-             kz035, kz052, kz060, kz065, kz066, kz070, kz071, kz082, kz095, zahllast, eingereicht, eingereicht_am, notizen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+             kz035, kz052, kz060, kz061, kz065, kz066, kz070, kz072, kz082, kz095, zahllast, eingereicht, eingereicht_am, notizen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         return $stmt->execute([
             $data['jahr'], $data['monat'], $data['zeitraum_typ'],
             $data['kz000'], $data['kz001'], $data['kz021'], $data['kz022'], $data['kz029'],
             $data['kz025'], $data['kz027'], $data['kz035'], $data['kz052'],
-            $data['kz060'], $data['kz065'], $data['kz066'], $data['kz070'], $data['kz071'],
+            $data['kz060'], $data['kz061'] ?? 0, $data['kz065'], $data['kz066'], $data['kz070'], $data['kz072'] ?? 0,
             $data['kz082'], $data['kz095'], $data['zahllast'],
             $data['eingereicht'] ?? 0, $data['eingereicht_am'] ?? null, $data['notizen'] ?? null
         ]);
@@ -718,28 +718,43 @@ function saveEinkommensteuer($data) {
     $stmt->execute([$data['jahr']]);
     $existing = $stmt->fetch();
     
+    // Standard-Kennzahlen
+    $standardKz = ['kz9040', 'kz9050', 'kz9100', 'kz9110', 'kz9120', 'kz9130', 'kz9134', 'kz9135', 'kz9140', 'kz9150'];
+    
+    // Weitere Kennzahlen als JSON sammeln (alle kz* die nicht Standard sind)
+    $weitereKz = [];
+    foreach ($data as $key => $value) {
+        if (preg_match('/^kz(\d{4})$/', $key, $matches)) {
+            $kzNum = $matches[1];
+            if (!in_array($key, $standardKz) && $value != 0) {
+                $weitereKz[$key] = floatval($value);
+            }
+        }
+    }
+    $weitereKzJson = !empty($weitereKz) ? json_encode($weitereKz) : null;
+    
     if ($existing) {
         $stmt = $db->prepare("UPDATE einkommensteuer SET 
             kz9040 = ?, kz9050 = ?, kz9100 = ?, kz9110 = ?, kz9120 = ?, 
             kz9130 = ?, kz9134 = ?, kz9135 = ?, kz9140 = ?, kz9150 = ?,
-            gewinn_verlust = ?, eingereicht = ?, eingereicht_am = ?, notizen = ?
+            weitere_kennzahlen = ?, gewinn_verlust = ?, eingereicht = ?, eingereicht_am = ?, notizen = ?
             WHERE id = ?");
         return $stmt->execute([
             $data['kz9040'], $data['kz9050'], $data['kz9100'], $data['kz9110'], $data['kz9120'],
             $data['kz9130'], $data['kz9134'] ?? 0, $data['kz9135'] ?? 0, 
-            $data['kz9140'], $data['kz9150'], $data['gewinn_verlust'],
+            $data['kz9140'], $data['kz9150'], $weitereKzJson, $data['gewinn_verlust'],
             $data['eingereicht'] ?? 0, $data['eingereicht_am'] ?? null, $data['notizen'] ?? null,
             $existing['id']
         ]);
     } else {
         $stmt = $db->prepare("INSERT INTO einkommensteuer 
             (jahr, kz9040, kz9050, kz9100, kz9110, kz9120, kz9130, kz9134, kz9135, kz9140, kz9150, 
-             gewinn_verlust, eingereicht, eingereicht_am, notizen)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+             weitere_kennzahlen, gewinn_verlust, eingereicht, eingereicht_am, notizen)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         return $stmt->execute([
             $data['jahr'], $data['kz9040'], $data['kz9050'], $data['kz9100'], $data['kz9110'], $data['kz9120'],
             $data['kz9130'], $data['kz9134'] ?? 0, $data['kz9135'] ?? 0,
-            $data['kz9140'], $data['kz9150'], $data['gewinn_verlust'],
+            $data['kz9140'], $data['kz9150'], $weitereKzJson, $data['gewinn_verlust'],
             $data['eingereicht'] ?? 0, $data['eingereicht_am'] ?? null, $data['notizen'] ?? null
         ]);
     }
