@@ -2,20 +2,17 @@
 
 **Version 1.6** | Für österreichische Einnahmen-Ausgaben-Rechnung mit USt-Voranmeldung (U30) und Einkommensteuer (E1a)
 
-![PHP](https://img.shields.io/badge/PHP-%3E%3D7.4-777BB4?logo=php&logoColor=white)
-![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
-![License](https://img.shields.io/badge/License-MIT-green)
-
-![PhpSpreadsheet](https://img.shields.io/badge/PhpSpreadsheet-%5E1.29-217346?logo=microsoft-excel&logoColor=white)
-
 ## Anforderungen
 
-![PHP](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/main/composer.json&query=$.require.php&label=PHP&color=777BB4&logo=php&logoColor=white)
-![PhpSpreadsheet](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/main/composer.lock&query=$.packages[?(@.name=="phpoffice/phpspreadsheet")].version&label=PhpSpreadsheet&color=217346)
+![PHP](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/V0.01.06/versionen&query=$.require.php&label=PHP&color=777BB4&logo=php&logoColor=white)
+![MySQL](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/V0.01.06/versionen&query=$.require.mysql&label=MySQL&color=777BB4&logo=MySQL&logoColor=white)
+![PhpSpreadsheet](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/V0.01.06/versionen&query=$.require.phpoffice/phpspreadsheet&label=PhpSpreadsheet&logoColor=white&color=orange)
 
-
-
-
+![License](https://img.shields.io/badge/License-GPLv3-green)
+![Latest Release](https://img.shields.io/github/v/release/Hanner72/ekassa360?include_prereleases)
+![Latest Tag](https://img.shields.io/github/v/tag/Hanner72/ekassa360)
+![Default Branch](https://img.shields.io/github/repo-size/Hanner72/ekassa360?label=default%20branch)
+![Last Commit](https://img.shields.io/github/last-commit/Hanner72/ekassa360/main?label=last%20commit)
 
 ## Features
 
