@@ -1,6 +1,6 @@
 # EKassa360 - Buchhaltung für österreichische Kleinunternehmer
 
-**Version 1.6** | Für österreichische Einnahmen-Ausgaben-Rechnung mit USt-Voranmeldung (U30) und Einkommensteuer (E1a)
+**Version 0.1.7** | Für österreichische Einnahmen-Ausgaben-Rechnung mit USt-Voranmeldung (U30) und Einkommensteuer (E1a)
 
 ## Anforderungen
 
