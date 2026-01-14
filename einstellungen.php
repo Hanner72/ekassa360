@@ -726,9 +726,12 @@ $e1aKennzahlen = [
                         <div class="row">
                             <div class="col-md-6">
                                 <table class="table table-sm">
-                                    <tr><td>PHP Version</td><td><code><?= phpversion() ?></code></td></tr>
-                                    <tr><td>MySQL Version</td><td><code><?= $db->query("SELECT VERSION()")->fetchColumn() ?></code></td></tr>
-                                    <tr><td>EKassa360 Version</td><td><code>1.6</code></td></tr>
+                                    <!-- <tr><td>PHP Version</td><td><code><?= phpversion() ?></code></td></tr> -->
+                                    <tr><td>PHP Version</td><td><img src="https://img.shields.io/badge/PHP-<?= phpversion() ?>-blue" alt=""></td></tr>
+                                    <!-- <tr><td>MySQL Version</td><td><code><?= $db->query("SELECT VERSION()")->fetchColumn() ?></code></td></tr> -->
+                                    <tr><td>MySQL Version</td><td><img src="https://img.shields.io/badge/MySQL-<?= $db->query("SELECT VERSION()")->fetchColumn() ?>-777BB4" alt=""></td></tr>
+                                    <tr><td>EKassa360 Version</td><td><img src="https://img.shields.io/badge/Version-v0.1.7-lightgreen" alt=""></td></tr>
+                                    <tr><td>EKassa360 auf Github</td><td><img src="https://img.shields.io/github/v/release/Hanner72/ekassa360?include_prereleases" alt=""></td></tr>
                                 </table>
                             </div>
                             <div class="col-md-6">

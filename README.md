@@ -6,7 +6,6 @@
 
 ![PHP](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/V0.01.06/versionen&query=$.require.php&label=PHP&color=777BB4&logo=php&logoColor=white)
 ![MySQL](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/V0.01.06/versionen&query=$.require.mysql&label=MySQL&color=777BB4&logo=MySQL&logoColor=white)
-![PhpSpreadsheet](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/V0.01.06/versionen&query=$.require.phpoffice/phpspreadsheet&label=PhpSpreadsheet&logoColor=white&color=orange)
 
 ![License](https://img.shields.io/badge/License-GPLv3-green)
 ![Latest Release](https://img.shields.io/github/v/release/Hanner72/ekassa360?include_prereleases)
@@ -43,8 +42,6 @@
 ## Installation
 
 ### Voraussetzungen
-- PHP 8.1 oder höher
-- MySQL 5.7+ / MariaDB 10.3+
 - PHP-Erweiterungen: PDO, pdo_mysql, json, mbstring, zip
 
 ### Schritt 1: Dateien hochladen
