@@ -222,6 +222,16 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $anschaffungswert = 1899.00;
         $ustBetragAnlage = $anschaffungswert * 0.20;
         $stmtAnlage->execute([1, 'MacBook Pro 14"', 'Sonstige', '2025-02-01', $anschaffungswert + $ustBetragAnlage, $anschaffungswert, $ust20Id, $ustBetragAnlage, 3, 'linear', '9130', $_SESSION['user_id'] ?? 1]);
+
+        $afabeispiele = [
+            [1, 2025, 759.27, 2278.80, 1519.53, '2026-01-14 15:35:15'],
+            [1, 2026, 759.27, 1519.53, 760.27, '2026-01-14 15:35:15'],
+            [1, 2027, 759.27, 760.27, 1.00, '2026-01-14 15:35:15'],
+        ];
+        $stmtafa = $db->prepare("INSERT INTO afa_buchungen (anlagegut_id, jahr, afa_betrag, restwert_vor, restwert_nach, created_at) VALUES (?, ?, ?, ?, ?, ?)");
+        foreach ($afabeispiele as $af) {
+            $stmtafa->execute([$af[0], $af[1], $af[2], $af[3], $af[4], $af[5]]);
+        }
         
         setFlashMessage('success', 'Beispieldaten wurden erstellt: 24 Rechnungen für 2025, 4 für 2026, 1 Anlagegut.');
         header('Location: einstellungen.php?tab=wartung');
