@@ -2,6 +2,21 @@
 
 **Version 1.6** | Für österreichische Einnahmen-Ausgaben-Rechnung mit USt-Voranmeldung (U30) und Einkommensteuer (E1a)
 
+![PHP](https://img.shields.io/badge/PHP-%3E%3D7.4-777BB4?logo=php&logoColor=white)
+![MySQL](https://img.shields.io/badge/MySQL-8.0-4479A1?logo=mysql&logoColor=white)
+![License](https://img.shields.io/badge/License-MIT-green)
+
+![PhpSpreadsheet](https://img.shields.io/badge/PhpSpreadsheet-%5E1.29-217346?logo=microsoft-excel&logoColor=white)
+
+## Anforderungen
+
+![PHP](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/main/composer.json&query=$.require.php&label=PHP&color=777BB4&logo=php&logoColor=white)
+![PhpSpreadsheet](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/main/composer.lock&query=$.packages[?(@.name=="phpoffice/phpspreadsheet")].version&label=PhpSpreadsheet&color=217346)
+
+
+
+
+
 ## Features
 
 ### Kernfunktionen
