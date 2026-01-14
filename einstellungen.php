@@ -107,6 +107,147 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: einstellungen.php?tab=kategorien');
         exit;
     }
+    
+    // Beispieldaten erstellen
+    if (isset($_POST['create_beispieldaten'])) {
+        // Kategorien und USt-Sätze laden
+        $kategorien = $db->query("SELECT id, name, typ FROM kategorien WHERE aktiv = 1")->fetchAll();
+        $ustSaetze = $db->query("SELECT id, satz, bezeichnung FROM ust_saetze WHERE aktiv = 1")->fetchAll();
+        
+        // Nach Typ gruppieren
+        $einnahmeKategorien = array_filter($kategorien, fn($k) => $k['typ'] === 'einnahme');
+        $ausgabeKategorien = array_filter($kategorien, fn($k) => $k['typ'] === 'ausgabe');
+        $ust20 = array_filter($ustSaetze, fn($u) => $u['satz'] == 20);
+        $ust10 = array_filter($ustSaetze, fn($u) => $u['satz'] == 10);
+        $ust0 = array_filter($ustSaetze, fn($u) => $u['satz'] == 0 && strpos($u['bezeichnung'], 'innergemeinschaft') === false && strpos($u['bezeichnung'], 'Reverse') === false);
+        
+        $ust20Id = !empty($ust20) ? reset($ust20)['id'] : null;
+        $ust10Id = !empty($ust10) ? reset($ust10)['id'] : null;
+        $ust0Id = !empty($ust0) ? reset($ust0)['id'] : null;
+        
+        $einnahmeKatIds = array_column(array_values($einnahmeKategorien), 'id');
+        $ausgabeKatIds = array_column(array_values($ausgabeKategorien), 'id');
+        
+        // Beispiel-Einnahmen 2025
+        $einnahmen2025 = [
+            ['2025-01-15', 'Website-Entwicklung Müller GmbH', 2500.00, $ust20Id],
+            ['2025-02-20', 'IT-Beratung Weber AG', 1800.00, $ust20Id],
+            ['2025-03-10', 'App-Entwicklung Firma Huber', 3200.00, $ust20Id],
+            ['2025-04-05', 'Hosting-Service Q1', 450.00, $ust20Id],
+            ['2025-05-18', 'WordPress Wartung', 350.00, $ust20Id],
+            ['2025-06-22', 'SEO Optimierung', 1200.00, $ust20Id],
+            ['2025-07-30', 'Shop-System Erweiterung', 4500.00, $ust20Id],
+            ['2025-08-14', 'Newsletter-System Setup', 800.00, $ust20Id],
+            ['2025-09-08', 'Datenbank-Migration', 1650.00, $ust20Id],
+            ['2025-10-25', 'Logo-Design Startup', 950.00, $ust20Id],
+            ['2025-11-12', 'Webinar-Schulung', 600.00, $ust10Id],
+            ['2025-12-19', 'Jahres-Wartungsvertrag', 2800.00, $ust20Id],
+        ];
+        
+        // Beispiel-Ausgaben 2025
+        $ausgaben2025 = [
+            ['2025-01-05', 'Hosting Server', 89.00, $ust20Id],
+            ['2025-01-20', 'Adobe Creative Cloud', 59.99, $ust20Id],
+            ['2025-02-10', 'Büromaterial', 45.50, $ust20Id],
+            ['2025-03-15', 'Domain-Verlängerungen', 120.00, $ust20Id],
+            ['2025-04-22', 'Fachliteratur', 89.00, $ust10Id],
+            ['2025-05-08', 'Telefonkosten', 35.00, $ust20Id],
+            ['2025-06-30', 'SSL Zertifikate', 75.00, $ust20Id],
+            ['2025-07-15', 'Steuerberater Q2', 350.00, $ust20Id],
+            ['2025-08-20', 'Online-Werbung', 200.00, $ust20Id],
+            ['2025-09-25', 'Cloud-Speicher', 99.00, $ust20Id],
+            ['2025-10-10', 'WKO Mitgliedschaft', 120.00, $ust0Id],
+            ['2025-11-30', 'Software-Lizenzen', 299.00, $ust20Id],
+        ];
+        
+        // 2025 Buchungsnummer ermitteln
+        $stmt = $db->prepare("SELECT COALESCE(MAX(buchungsnummer), 0) + 1 as next FROM rechnungen WHERE YEAR(datum) = 2025");
+        $stmt->execute();
+        $buchNr2025 = $stmt->fetch()['next'];
+        
+        // Einnahmen 2025 einfügen
+        $stmtInsert = $db->prepare("INSERT INTO rechnungen (buchungsnummer, datum, beschreibung, netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, typ, kategorie_id, erstellt_von) VALUES (?, ?, ?, ?, ?, ?, ?, 'einnahme', ?, ?)");
+        foreach ($einnahmen2025 as $e) {
+            $ustId = $e[3] ?? $ust20Id;
+            $ustSatz = 20;
+            foreach ($ustSaetze as $u) { if ($u['id'] == $ustId) { $ustSatz = $u['satz']; break; } }
+            $ustBetrag = $e[2] * ($ustSatz / 100);
+            $katId = !empty($einnahmeKatIds) ? $einnahmeKatIds[array_rand($einnahmeKatIds)] : null;
+            $stmtInsert->execute([$buchNr2025++, $e[0], $e[1], $e[2], $ustId, $ustBetrag, $e[2] + $ustBetrag, $katId, $_SESSION['user_id'] ?? 1]);
+        }
+        
+        // Ausgaben 2025 einfügen
+        $stmtInsert = $db->prepare("INSERT INTO rechnungen (buchungsnummer, datum, beschreibung, netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, typ, kategorie_id, erstellt_von) VALUES (?, ?, ?, ?, ?, ?, ?, 'ausgabe', ?, ?)");
+        foreach ($ausgaben2025 as $a) {
+            $ustId = $a[3] ?? $ust20Id;
+            $ustSatz = 20;
+            foreach ($ustSaetze as $u) { if ($u['id'] == $ustId) { $ustSatz = $u['satz']; break; } }
+            $ustBetrag = $a[2] * ($ustSatz / 100);
+            $katId = !empty($ausgabeKatIds) ? $ausgabeKatIds[array_rand($ausgabeKatIds)] : null;
+            $stmtInsert->execute([$buchNr2025++, $a[0], $a[1], $a[2], $ustId, $ustBetrag, $a[2] + $ustBetrag, $katId, $_SESSION['user_id'] ?? 1]);
+        }
+        
+        // 2026 Beispieldaten
+        $stmt = $db->prepare("SELECT COALESCE(MAX(buchungsnummer), 0) + 1 as next FROM rechnungen WHERE YEAR(datum) = 2026");
+        $stmt->execute();
+        $buchNr2026 = $stmt->fetch()['next'];
+        
+        $einnahmen2026 = [
+            ['2026-01-10', 'Webshop Relaunch', 5500.00, $ust20Id],
+            ['2026-01-25', 'API Integration', 1900.00, $ust20Id],
+        ];
+        $ausgaben2026 = [
+            ['2026-01-08', 'Server Upgrade', 149.00, $ust20Id],
+            ['2026-01-20', 'Business-Software', 199.00, $ust20Id],
+        ];
+        
+        $stmtInsert = $db->prepare("INSERT INTO rechnungen (buchungsnummer, datum, beschreibung, netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, typ, kategorie_id, erstellt_von) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        foreach ($einnahmen2026 as $e) {
+            $ustSatz = 20;
+            foreach ($ustSaetze as $u) { if ($u['id'] == $e[3]) { $ustSatz = $u['satz']; break; } }
+            $ustBetrag = $e[2] * ($ustSatz / 100);
+            $katId = !empty($einnahmeKatIds) ? $einnahmeKatIds[array_rand($einnahmeKatIds)] : null;
+            $stmtInsert->execute([$buchNr2026++, $e[0], $e[1], $e[2], $e[3], $ustBetrag, $e[2] + $ustBetrag, 'einnahme', $katId, $_SESSION['user_id'] ?? 1]);
+        }
+        foreach ($ausgaben2026 as $a) {
+            $ustSatz = 20;
+            foreach ($ustSaetze as $u) { if ($u['id'] == $a[3]) { $ustSatz = $u['satz']; break; } }
+            $ustBetrag = $a[2] * ($ustSatz / 100);
+            $katId = !empty($ausgabeKatIds) ? $ausgabeKatIds[array_rand($ausgabeKatIds)] : null;
+            $stmtInsert->execute([$buchNr2026++, $a[0], $a[1], $a[2], $a[3], $ustBetrag, $a[2] + $ustBetrag, 'ausgabe', $katId, $_SESSION['user_id'] ?? 1]);
+        }
+        
+        // Beispiel-Anlagegut
+        $stmtAnlage = $db->prepare("INSERT INTO anlagegueter (buchungsnummer, bezeichnung, kategorie, anschaffungsdatum, anschaffungswert, netto_betrag, ust_satz_id, ust_betrag, nutzungsdauer, afa_methode, e1a_kennzahl, status, erstellt_von) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'aktiv', ?)");
+        $anschaffungswert = 1899.00;
+        $ustBetragAnlage = $anschaffungswert * 0.20;
+        $stmtAnlage->execute([1, 'MacBook Pro 14"', 'Sonstige', '2025-02-01', $anschaffungswert + $ustBetragAnlage, $anschaffungswert, $ust20Id, $ustBetragAnlage, 3, 'linear', '9130', $_SESSION['user_id'] ?? 1]);
+        
+        setFlashMessage('success', 'Beispieldaten wurden erstellt: 24 Rechnungen für 2025, 4 für 2026, 1 Anlagegut.');
+        header('Location: einstellungen.php?tab=wartung');
+        exit;
+    }
+    
+    // Alle Daten löschen
+    if (isset($_POST['reset_daten']) && $_POST['confirm_text'] === 'LÖSCHEN') {
+        $db->exec("DELETE FROM afa_buchungen");
+        $db->exec("DELETE FROM anlagegueter");
+        $db->exec("DELETE FROM rechnungen");
+        $db->exec("DELETE FROM einkommensteuer");
+        $db->exec("DELETE FROM ust_voranmeldungen");
+        $db->exec("DELETE FROM aenderungsprotokoll WHERE tabelle != 'benutzer'");
+        
+        // Auto-Increment zurücksetzen
+        $db->exec("ALTER TABLE rechnungen AUTO_INCREMENT = 1");
+        $db->exec("ALTER TABLE anlagegueter AUTO_INCREMENT = 1");
+        $db->exec("ALTER TABLE afa_buchungen AUTO_INCREMENT = 1");
+        $db->exec("ALTER TABLE einkommensteuer AUTO_INCREMENT = 1");
+        $db->exec("ALTER TABLE ust_voranmeldungen AUTO_INCREMENT = 1");
+        
+        setFlashMessage('success', 'Alle Buchungsdaten wurden gelöscht. Kategorien, USt-Sätze und Benutzer bleiben erhalten.');
+        header('Location: einstellungen.php?tab=wartung');
+        exit;
+    }
 }
 
 // Daten laden
@@ -177,6 +318,11 @@ $e1aKennzahlen = [
                     <li class="nav-item">
                         <a class="nav-link <?= $tab === 'hilfe' ? 'active' : '' ?>" href="?tab=hilfe">
                             <i class="bi bi-question-circle me-1"></i>Kennzahlen
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $tab === 'wartung' ? 'active' : '' ?>" href="?tab=wartung">
+                            <i class="bi bi-gear me-1"></i>Wartung
                         </a>
                     </li>
                 </ul>
@@ -506,6 +652,91 @@ $e1aKennzahlen = [
                                     <tr><td>Instandhaltung</td><td><code>9150</code></td></tr>
                                     <tr><td>SVS Beiträge</td><td><code>9225</code></td></tr>
                                     <tr><td>Übrige</td><td><code>9230</code></td></tr>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <?php elseif ($tab === 'wartung'): ?>
+                <!-- WARTUNG -->
+                <div class="row">
+                    <div class="col-md-6">
+                        <div class="card mb-4">
+                            <div class="card-header bg-success text-white">
+                                <i class="bi bi-plus-circle me-2"></i>Beispieldaten erstellen
+                            </div>
+                            <div class="card-body">
+                                <p>Erstellt realistische Testdaten für die Demonstration:</p>
+                                <ul>
+                                    <li>12 Einnahmen für 2025</li>
+                                    <li>12 Ausgaben für 2025</li>
+                                    <li>2 Einnahmen für 2026</li>
+                                    <li>2 Ausgaben für 2026</li>
+                                    <li>1 Anlagegut (Laptop)</li>
+                                </ul>
+                                <form method="POST" onsubmit="return confirm('Beispieldaten wirklich erstellen?')">
+                                    <button type="submit" name="create_beispieldaten" class="btn btn-success">
+                                        <i class="bi bi-plus-lg me-1"></i>Beispieldaten erstellen
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card mb-4 border-danger">
+                            <div class="card-header bg-danger text-white">
+                                <i class="bi bi-exclamation-triangle me-2"></i>Alle Daten löschen
+                            </div>
+                            <div class="card-body">
+                                <div class="alert alert-warning">
+                                    <strong>Achtung!</strong> Diese Aktion löscht unwiderruflich:
+                                    <ul class="mb-0 mt-2">
+                                        <li>Alle Rechnungen (Einnahmen/Ausgaben)</li>
+                                        <li>Alle Anlagegüter und AfA-Buchungen</li>
+                                        <li>Alle E1a und U30 Berechnungen</li>
+                                        <li>Das Änderungsprotokoll</li>
+                                    </ul>
+                                </div>
+                                <p><strong>Nicht gelöscht:</strong> Kategorien, USt-Sätze, Firmendaten, Benutzer</p>
+                                <form method="POST" onsubmit="return confirm('ACHTUNG: Alle Buchungsdaten werden unwiderruflich gelöscht! Fortfahren?')">
+                                    <div class="mb-3">
+                                        <label class="form-label">Zur Bestätigung "LÖSCHEN" eingeben:</label>
+                                        <input type="text" class="form-control" name="confirm_text" placeholder="LÖSCHEN" required autocomplete="off">
+                                    </div>
+                                    <button type="submit" name="reset_daten" class="btn btn-danger">
+                                        <i class="bi bi-trash me-1"></i>Alle Daten löschen
+                                    </button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <i class="bi bi-info-circle me-2"></i>System-Informationen
+                    </div>
+                    <div class="card-body">
+                        <?php
+                        $rechnungenCount = $db->query("SELECT COUNT(*) FROM rechnungen")->fetchColumn();
+                        $anlagenCount = $db->query("SELECT COUNT(*) FROM anlagegueter")->fetchColumn();
+                        $e1aCount = $db->query("SELECT COUNT(*) FROM einkommensteuer")->fetchColumn();
+                        $u30Count = $db->query("SELECT COUNT(*) FROM ust_voranmeldungen")->fetchColumn();
+                        ?>
+                        <div class="row">
+                            <div class="col-md-6">
+                                <table class="table table-sm">
+                                    <tr><td>PHP Version</td><td><code><?= phpversion() ?></code></td></tr>
+                                    <tr><td>MySQL Version</td><td><code><?= $db->query("SELECT VERSION()")->fetchColumn() ?></code></td></tr>
+                                    <tr><td>EKassa360 Version</td><td><code>1.6</code></td></tr>
+                                </table>
+                            </div>
+                            <div class="col-md-6">
+                                <table class="table table-sm">
+                                    <tr><td>Rechnungen</td><td><span class="badge bg-primary"><?= $rechnungenCount ?></span></td></tr>
+                                    <tr><td>Anlagegüter</td><td><span class="badge bg-primary"><?= $anlagenCount ?></span></td></tr>
+                                    <tr><td>E1a Berechnungen</td><td><span class="badge bg-info"><?= $e1aCount ?></span></td></tr>
+                                    <tr><td>U30 Meldungen</td><td><span class="badge bg-info"><?= $u30Count ?></span></td></tr>
                                 </table>
                             </div>
                         </div>
