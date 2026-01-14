@@ -166,7 +166,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $buchNr2025 = $stmt->fetch()['next'];
         
         // Einnahmen 2025 einfügen
-        $stmtInsert = $db->prepare("INSERT INTO rechnungen (buchungsnummer, datum, beschreibung, netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, typ, kategorie_id, erstellt_von) VALUES (?, ?, ?, ?, ?, ?, ?, 'einnahme', ?, ?)");
+        $stmtInsert = $db->prepare("INSERT INTO rechnungen (buchungsnummer, datum, beschreibung, netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, typ, kategorie_id, erstellt_von, bezahlt) VALUES (?, ?, ?, ?, ?, ?, ?, 'einnahme', ?, ?, 1)");
         foreach ($einnahmen2025 as $e) {
             $ustId = $e[3] ?? $ust20Id;
             $ustSatz = 20;
@@ -177,7 +177,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
         
         // Ausgaben 2025 einfügen
-        $stmtInsert = $db->prepare("INSERT INTO rechnungen (buchungsnummer, datum, beschreibung, netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, typ, kategorie_id, erstellt_von) VALUES (?, ?, ?, ?, ?, ?, ?, 'ausgabe', ?, ?)");
+        $stmtInsert = $db->prepare("INSERT INTO rechnungen (buchungsnummer, datum, beschreibung, netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, typ, kategorie_id, erstellt_von, bezahlt) VALUES (?, ?, ?, ?, ?, ?, ?, 'ausgabe', ?, ?, 1)");
         foreach ($ausgaben2025 as $a) {
             $ustId = $a[3] ?? $ust20Id;
             $ustSatz = 20;
@@ -201,7 +201,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             ['2026-01-20', 'Business-Software', 199.00, $ust20Id],
         ];
         
-        $stmtInsert = $db->prepare("INSERT INTO rechnungen (buchungsnummer, datum, beschreibung, netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, typ, kategorie_id, erstellt_von) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmtInsert = $db->prepare("INSERT INTO rechnungen (buchungsnummer, datum, beschreibung, netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, typ, kategorie_id, erstellt_von, bezahlt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
         foreach ($einnahmen2026 as $e) {
             $ustSatz = 20;
             foreach ($ustSaetze as $u) { if ($u['id'] == $e[3]) { $ustSatz = $u['satz']; break; } }
