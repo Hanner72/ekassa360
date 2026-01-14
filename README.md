@@ -1,6 +1,6 @@
-# EKassa360 - Buchhaltung für österreichische Kleinunternehmer
+# EKassa360 - Buchhaltung für österreichische Klein- und Mittelbetriebe
 
-Für österreichische Einnahmen-Ausgaben-Rechnung mit USt-Voranmeldung (U30) und Einkommensteuer (E1a)
+Für österreichische Einnahmen-Ausgaben-Rechnung mit automatisch generierbarer USt-Voranmeldung (U30) und Einkommensteuer (E1a) und dies monatlich, quartalweise oder jährlich
 
 ![PHP](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/V0.01.06/versionen&query=$.require.php&label=PHP&color=777BB4&logo=php&logoColor=white)
 ![MySQL](https://img.shields.io/badge/dynamic/json?url=https://raw.githubusercontent.com/Hanner72/ekassa360/refs/heads/V0.01.06/versionen&query=$.require.mysql&label=MySQL&color=777BB4&logo=MySQL&logoColor=white)
