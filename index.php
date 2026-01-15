@@ -104,7 +104,7 @@ $openInvoices = getOpenInvoices();
                         <div class="card">
                             <div class="card-header d-flex justify-content-between align-items-center">
                                 <h5 class="mb-0"><i class="bi bi-receipt me-2"></i>Letzte Rechnungen</h5>
-                                <a href="rechnungen.php" class="btn btn-sm btn-outline-primary">Alle anzeigen</a>
+                                <a href="rechnungen.php" class="btn btn-sm btn-outline-warning">Alle anzeigen</a>
                             </div>
                             <div class="card-body p-0">
                                 <div class="table-responsive">
