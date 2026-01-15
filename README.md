@@ -50,26 +50,36 @@ Entpacken Sie das ZIP-Archiv in Ihr Webserver-Verzeichnis:
 /var/www/html/ekassa360/
 ```
 
-### Schritt 2: Installationsassistent
-Öffnen Sie im Browser:
-```
-https://ihre-domain.at/ekassa360/install.php
-```
+### Schritt 2: Datenbankinstallation
 
-Der Assistent führt Sie durch:
-1. Datenbankverbindung eingeben
-2. Tabellen werden automatisch erstellt
-3. Admin-Benutzer anlegen
-4. Konfiguration wird gespeichert
+1. Datenbank auf Ihrem Server anlegen und importieren
+    ```
+    /database/ekassa360.sql
+    ```
+2. Zugangsdaten Ihrer Datenbank in folgende Datei eintragen
+    ```
+    /config/database.php
+    ```
 
-### Schritt 3: Sicherheit
-**WICHTIG:** Löschen Sie nach der Installation die Datei `install.php`:
-```bash
-rm install.php
-```
+    ```php
+    <?php
+    define('DB_HOST', 'localhost');
+    define('DB_NAME', 'ekassa360');
+    define('DB_USER', 'ihr_benutzer');
+    define('DB_PASS', 'ihr_passwort');
+    ```
+
+### Schritt 3: Anmelden
+auf Ihrer Seite anmelden.
+z.B: https://ihre-seite.com/ekassa360
+
+Standard Admin:
+    
+    Benutzer: admin
+    PW: admin123
 
 ### Schritt 4: Firmendaten
-Melden Sie sich an und tragen Sie unter **Einstellungen → Firma** Ihre Daten ein.
+Tragen Sie unter **Einstellungen → Firma** Ihre Daten ein.
 
 ---
 
@@ -104,16 +114,6 @@ Bei **Rechnungen → Neu** den passenden USt-Satz wählen:
 ---
 
 ## Konfiguration
-
-### database.php
-Nach der Installation enthält `config/database.php`:
-```php
-<?php
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'ekassa360');
-define('DB_USER', 'ihr_benutzer');
-define('DB_PASS', 'ihr_passwort');
-```
 
 ### USt-Periode
 Unter **Einstellungen → Firma** wählen Sie:
@@ -216,7 +216,6 @@ ekassa360/
 ├── einkommensteuer.php    # E1a
 ├── einstellungen.php      # Einstellungen
 ├── import.php             # Excel-Import
-├── install.php            # Installationsassistent
 └── README.md              # Diese Datei
 ```
 
@@ -234,20 +233,26 @@ ekassa360/
 
 ## Changelog
 
-### v1.6 (aktuell)
+### v0.1.7
+- Bugs ausbessern
+- grafische updates
+- Datenbank updates
+- Installationsassisten entfernt
+
+### v0.1.6
 - EU-Buchungen: igE, Reverse Charge, Drittland
 - Neue U30-Kennzahlen: KZ072, KZ061
 - Dynamische E1a-Kennzahlen (JSON-Speicherung)
 - Wartungs-Tab: Beispieldaten & Reset
 - Installationsassistent
 
-### v1.5
+### v0.1.5
 - Einheitliches blaues Design
 - Benutzerverwaltung mit Rollen
 - Excel-Import (xlsx, xls, csv)
 - Änderungsprotokoll
 
-### v1.0-1.4
+### v0.1.0-0.1.4
 - Basis-Buchhaltung
 - USt-Voranmeldung (U30)
 - Einkommensteuer (E1a)
