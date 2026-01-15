@@ -548,7 +548,7 @@ $rechnungen = getRechnungen($filters);
                                         <td><small><?= htmlspecialchars($r['kategorie_name'] ?? '-') ?></small></td>
                                         <td class="text-end"><?= formatBetrag($r['netto_betrag']) ?></td>
                                         <td class="text-end"><?= formatBetrag($r['ust_betrag']) ?></td>
-                                        <td class="text-end"><strong><?= formatBetrag($r['brutto_betrag']) ?></strong></td>
+                                        <td class="text-end text-<?= $r['typ'] == 'einnahme' ? 'success' : 'danger' ?>"><strong><?= formatBetrag($r['brutto_betrag']) ?></strong></td>
                                         <td>
                                             <?php if ($r['bezahlt']): ?>
                                                 <span class="badge bg-success"><i class="bi bi-check"></i></span>
@@ -570,17 +570,17 @@ $rechnungen = getRechnungen($filters);
                                     </tr>
                                     <?php endforeach; ?>
                                     <tr class="table-light fw-bold">
-                                        <td colspan="7" class="text-end">Summe Einnahmen:</td>
+                                        <td colspan="8" class="text-end">Summe Einnahmen:</td>
                                         <td class="text-end text-success"><?= formatBetrag($summeEinnahmen) ?></td>
                                         <td colspan="2"></td>
                                     </tr>
                                     <tr class="table-light fw-bold">
-                                        <td colspan="7" class="text-end">Summe Ausgaben:</td>
+                                        <td colspan="8" class="text-end">Summe Ausgaben:</td>
                                         <td class="text-end text-danger"><?= formatBetrag($summeAusgaben) ?></td>
                                         <td colspan="2"></td>
                                     </tr>
                                     <tr class="table-primary fw-bold">
-                                        <td colspan="7" class="text-end">Saldo:</td>
+                                        <td colspan="8" class="text-end">Saldo:</td>
                                         <td class="text-end"><?= formatBetrag($summeEinnahmen - $summeAusgaben) ?></td>
                                         <td colspan="2"></td>
                                     </tr>
