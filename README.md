@@ -262,7 +262,7 @@ ekassa360/
 
 ## Lizenz
 
-MIT License - Frei für private und kommerzielle Nutzung.
+GPL-3.0 license - Frei für private und kommerzielle Nutzung und soll es auch in Zukunft bleiben.
 
 ---
 
@@ -270,6 +270,11 @@ MIT License - Frei für private und kommerzielle Nutzung.
 
 Bei Fragen oder Problemen:
 - GitHub Issues erstellen
-- Dokumentation auf docs.ekassa360.at
+- Github Discussions - dem Forum beitreten und gemeinsam am Projekt weiterarbeiten
+
+---
+
+## Sonstiges
 
 **Hinweis:** EKassa360 ersetzt keine steuerliche Beratung. Für verbindliche Auskünfte wenden Sie sich an Ihren Steuerberater.
+Es wird immer vorausgesetzt dass die steuerlichen Angaben kontrolliert werden und darum wird keine Haftung übernommen.
