@@ -250,6 +250,7 @@ CREATE TABLE `rechnungen` (
   `kategorie_id` int DEFAULT NULL,
   `bezahlt` tinyint(1) DEFAULT '0',
   `bezahlt_am` date DEFAULT NULL,
+  `zahlungsart` enum('bankueberweisung','bar','sonstige') NOT NULL DEFAULT 'bankueberweisung',
   `buchungsart` enum('inland','eu_ige','eu_b2c','drittland','drittland_import') COLLATE utf8mb4_general_ci DEFAULT 'inland',
   `lieferant_land` varchar(50) COLLATE utf8mb4_general_ci DEFAULT NULL,
   `lieferant_uid` varchar(50) COLLATE utf8mb4_general_ci DEFAULT NULL,

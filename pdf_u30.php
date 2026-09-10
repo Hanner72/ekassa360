@@ -50,11 +50,23 @@ $zeitraumText = $zeitraumTyp == 'quartal'
 class U30_PDF extends FPDF {
     protected $firma;
     protected $zeitraum;
-    
+
+    private function enc($str) {
+        return iconv('UTF-8', 'ISO-8859-1//TRANSLIT', (string)$str);
+    }
+
+    function Cell($w, $h=0, $txt='', $border=0, $ln=0, $align='', $fill=false, $link='') {
+        parent::Cell($w, $h, $this->enc($txt), $border, $ln, $align, $fill, $link);
+    }
+
+    function MultiCell($w, $h, $txt, $border=0, $align='J', $fill=false) {
+        parent::MultiCell($w, $h, $this->enc($txt), $border, $align, $fill);
+    }
+
     function setFirma($firma) {
         $this->firma = $firma;
     }
-    
+
     function setZeitraum($zeitraum) {
         $this->zeitraum = $zeitraum;
     }
@@ -210,7 +222,7 @@ if (($u30['kz070'] ?? 0) > 0) {
     $pdf->Ln(2);
     
     $pdf->KennzahlRow('070', 'Erwerbe aus EU-Mitgliedstaaten (Bemessung)', $u30['kz070'], true);
-    $pdf->KennzahlRow('072', 'Erwerbsteuer 20% (geschuldet)', $u30['kz072'] ?? 0);
+    $pdf->KennzahlRow('072', 'davon Normalsatz 20% steuerpflichtig (Erwerbsteuer: ' . number_format(($u30['kz072'] ?? 0) * 0.20, 2, ',', '.') . ' EUR)', $u30['kz072'] ?? 0);
     
     $pdf->SetFont('Arial', 'I', 8);
     $pdf->SetTextColor(100, 100, 100);
@@ -245,9 +257,9 @@ $pdf->Cell(45, 7, number_format($vorsteuerGesamt, 2, ',', '.') . ' EUR', 1, 1, '
 
 $pdf->Ln(8);
 
-// Ergebnis - inkl. Erwerbsteuer aus igE
-$ustGesamtMitIgE = $ustGesamt + ($u30['kz072'] ?? 0);
-$zahllast = $ustGesamtMitIgE - $vorsteuerGesamt;
+// Ergebnis - kz072 = Bemessungsgrundlage, Erwerbsteuer = kz072 × 20%
+$ustGesamtMitIgE = $ustGesamt + (($u30['kz072'] ?? 0) * 0.20);
+$zahllast = $u30['kz095'] ?? ($ustGesamtMitIgE - $vorsteuerGesamt);
 $isZahllast = $zahllast >= 0;
 
 $pdf->SectionHeader($isZahllast ? 'Zahllast (KZ 095)' : 'Gutschrift (KZ 095)');

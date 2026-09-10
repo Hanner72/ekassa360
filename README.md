@@ -233,6 +233,10 @@ ekassa360/
 
 ## Changelog
 
+### v0.1.8
+- Sortierung der Rechnungen ändern
+  - Buch-Nr. , Datum
+
 ### v0.1.7
 - Bugs ausbessern
 - grafische updates

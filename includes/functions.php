@@ -172,7 +172,7 @@ function getRechnungen($filters = []) {
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
             LEFT JOIN ust_saetze u ON r.ust_satz_id = u.id
             $whereClause
-            ORDER BY r.datum DESC, r.created_at DESC";
+            ORDER BY r.buchungsnummer DESC, r.datum DESC, r.created_at DESC";
     
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -259,18 +259,19 @@ function saveRechnung($data) {
     
     if (!empty($data['id'])) {
         // Update
-        $stmt = $db->prepare("UPDATE rechnungen SET 
+        $stmt = $db->prepare("UPDATE rechnungen SET
             typ = ?, rechnungsnummer = ?, buchungsnummer = ?, datum = ?, faellig_am = ?,
             kunde_lieferant = ?, beschreibung = ?, netto_betrag = ?,
             ust_satz_id = ?, ust_betrag = ?, brutto_betrag = ?,
-            kategorie_id = ?, bezahlt = ?, bezahlt_am = ?, notizen = ?, geaendert_von = ?,
+            kategorie_id = ?, bezahlt = ?, bezahlt_am = ?, zahlungsart = ?, notizen = ?, geaendert_von = ?,
             buchungsart = ?, lieferant_land = ?, lieferant_uid = ?, ausland_ust_satz = ?, ausland_ust_betrag = ?
             WHERE id = ?");
         $result = $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
             $data['kunde_lieferant'], $data['beschreibung'], $data['netto_betrag'],
             $data['ust_satz_id'] ?: null, $ustBetrag, $bruttoBetrag,
-            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null, $data['notizen'],
+            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null,
+            $data['zahlungsart'] ?? 'bankueberweisung', $data['notizen'],
             $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag,
             $data['id']
         ]);
@@ -282,16 +283,17 @@ function saveRechnung($data) {
         return $result;
     } else {
         // Insert
-        $stmt = $db->prepare("INSERT INTO rechnungen 
-            (typ, rechnungsnummer, buchungsnummer, datum, faellig_am, kunde_lieferant, beschreibung, 
-             netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, kategorie_id, bezahlt, bezahlt_am, notizen, erstellt_von,
+        $stmt = $db->prepare("INSERT INTO rechnungen
+            (typ, rechnungsnummer, buchungsnummer, datum, faellig_am, kunde_lieferant, beschreibung,
+             netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, kategorie_id, bezahlt, bezahlt_am, zahlungsart, notizen, erstellt_von,
              buchungsart, lieferant_land, lieferant_uid, ausland_ust_satz, ausland_ust_betrag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
             $data['kunde_lieferant'], $data['beschreibung'], $data['netto_betrag'],
             $data['ust_satz_id'] ?: null, $ustBetrag, $bruttoBetrag,
-            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null, $data['notizen'],
+            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null,
+            $data['zahlungsart'] ?? 'bankueberweisung', $data['notizen'],
             $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag
         ]);
         $id = $db->lastInsertId();
@@ -427,23 +429,23 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
         'zahllast' => 0
     ];
     
-    // Zeitraum bestimmen
+    // Zeitraum bestimmen (Ist-Besteuerung: Zahlungsdatum ist maßgeblich)
     if ($typ == 'quartal') {
         $startMonat = ($monat - 1) * 3 + 1;
         $endMonat = $monat * 3;
-        $datumFilter = "YEAR(r.datum) = ? AND MONTH(r.datum) BETWEEN ? AND ?";
+        $datumFilter = "YEAR(r.bezahlt_am) = ? AND MONTH(r.bezahlt_am) BETWEEN ? AND ?";
         $params = [$jahr, $startMonat, $endMonat];
     } else {
-        $datumFilter = "YEAR(r.datum) = ? AND MONTH(r.datum) = ?";
+        $datumFilter = "YEAR(r.bezahlt_am) = ? AND MONTH(r.bezahlt_am) = ?";
         $params = [$jahr, $monat];
     }
-    
-    // Einnahmen nach USt-Satz gruppiert
+
+    // Einnahmen nach USt-Satz gruppiert (nur bezahlte Rechnungen)
     $sql = "SELECT u.u30_kennzahl_bemessung, u.satz,
                    SUM(r.netto_betrag) as netto, SUM(r.ust_betrag) as ust
             FROM rechnungen r
             LEFT JOIN ust_saetze u ON r.ust_satz_id = u.id
-            WHERE r.typ = 'einnahme' AND $datumFilter
+            WHERE r.typ = 'einnahme' AND r.bezahlt = 1 AND $datumFilter
             GROUP BY u.u30_kennzahl_bemessung, u.satz";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -476,31 +478,34 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     }
     $u30['kz000'] = $gesamtLieferungen;
     
-    // Vorsteuer (Ausgaben) - nur Inland und Drittland-Import
+    // Vorsteuer (Ausgaben) - nur Inland und Drittland-Import, nur bezahlte Rechnungen
     $sql = "SELECT SUM(r.ust_betrag) as vorsteuer
             FROM rechnungen r
-            WHERE r.typ = 'ausgabe' 
+            WHERE r.typ = 'ausgabe'
+            AND r.bezahlt = 1
             AND (r.buchungsart IS NULL OR r.buchungsart IN ('inland', 'drittland'))
             AND $datumFilter";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $vorsteuerRechnungen = $stmt->fetch()['vorsteuer'] ?? 0;
-    
+
     // Einfuhr-USt Drittland separat (KZ 061)
     $sql = "SELECT SUM(r.ust_betrag) as vorsteuer
             FROM rechnungen r
-            WHERE r.typ = 'ausgabe' 
+            WHERE r.typ = 'ausgabe'
+            AND r.bezahlt = 1
             AND r.buchungsart = 'drittland'
             AND $datumFilter";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $vorsteuerDrittland = $stmt->fetch()['vorsteuer'] ?? 0;
     $u30['kz061'] = $vorsteuerDrittland;
-    
+
     // Innergemeinschaftliche Erwerbe (igE) - Buchungsart 'eu_ige'
     $sql = "SELECT SUM(r.netto_betrag) as netto
             FROM rechnungen r
-            WHERE r.typ = 'ausgabe' 
+            WHERE r.typ = 'ausgabe'
+            AND r.bezahlt = 1
             AND r.buchungsart = 'eu_ige'
             AND $datumFilter";
     $stmt = $db->prepare($sql);
@@ -508,11 +513,11 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     $igeNetto = $stmt->fetch()['netto'] ?? 0;
     
     if ($igeNetto > 0) {
-        // igE: Bemessungsgrundlage (Netto aus EU-Einkäufen)
+        // igE: Bemessungsgrundlage gesamt (Netto aus EU-Einkäufen)
         $u30['kz070'] = $igeNetto;
-        // igE: Erwerbsteuer 20% (diese wird geschuldet) - KZ 072
-        $u30['kz072'] = $igeNetto * 0.20;
-        // igE: Gleichzeitig Vorsteuer daraus (gleicht sich aus) - KZ 065
+        // igE: davon zum Normalsatz 20% steuerpflichtig (= KZ070, wenn alle igE zum 20%-Satz)
+        $u30['kz072'] = $igeNetto;
+        // igE: Vorsteuer aus igE (Erwerbsteuer KZ072 × 20%, gleicht sich aus) - KZ 065
         $u30['kz065'] = $igeNetto * 0.20;
     }
     
@@ -530,8 +535,8 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     // Vorsteuer gesamt (ohne igE-Vorsteuer, die separat in kz065 steht)
     $u30['kz060'] = $vorsteuerRechnungen - $vorsteuerDrittland + $vorsteuerAnlagen;
     
-    // Zahllast berechnen: Summe aller Steuerbeträge - Vorsteuer
-    $ustGesamt = $u30['kz029'] + $u30['kz027'] + $u30['kz052'] + $u30['kz072'];
+    // Zahllast berechnen: kz072 = Bemessungsgrundlage → Erwerbsteuer = kz072 × 20%
+    $ustGesamt = $u30['kz029'] + $u30['kz027'] + $u30['kz052'] + ($u30['kz072'] * 0.20);
     $vorsteuerGesamt = $u30['kz060'] + $u30['kz061'] + $u30['kz065'] + $u30['kz066'];
     $u30['zahllast'] = $ustGesamt - $vorsteuerGesamt;
     $u30['kz095'] = $u30['zahllast'];
@@ -627,11 +632,11 @@ function berechneEinkommensteuer($jahr) {
         }
     }
     
-    // Einnahmen nach Kategorie - ALLE Kennzahlen
+    // Einnahmen nach Kategorie - ALLE Kennzahlen (Ist-Besteuerung: Zahlungsdatum ist maßgeblich)
     $sql = "SELECT k.e1a_kennzahl, COALESCE(SUM(r.netto_betrag), 0) as summe
             FROM rechnungen r
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
-            WHERE r.typ = 'einnahme' AND YEAR(r.datum) = ?
+            WHERE r.typ = 'einnahme' AND r.bezahlt = 1 AND YEAR(r.bezahlt_am) = ?
             GROUP BY k.e1a_kennzahl";
     $stmt = $db->prepare($sql);
     $stmt->execute([$jahr]);
@@ -652,7 +657,7 @@ function berechneEinkommensteuer($jahr) {
     $sql = "SELECT k.e1a_kennzahl, r.buchungsart, r.netto_betrag, r.ausland_ust_betrag
             FROM rechnungen r
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
-            WHERE r.typ = 'ausgabe' AND YEAR(r.datum) = ?";
+            WHERE r.typ = 'ausgabe' AND r.bezahlt = 1 AND YEAR(r.bezahlt_am) = ?";
     $stmt = $db->prepare($sql);
     $stmt->execute([$jahr]);
     foreach ($stmt->fetchAll() as $row) {

@@ -31,6 +31,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'bezahlt' => isset($_POST['bezahlt']) ? 1 : 0,
             'bezahlt_am' => $_POST['bezahlt_am'] ?: null,
             'notizen' => $_POST['notizen'],
+            'zahlungsart' => $_POST['zahlungsart'] ?? 'bankueberweisung',
             // EU-Buchungsfelder
             'buchungsart' => $_POST['buchungsart'] ?? 'inland',
             'lieferant_land' => $_POST['lieferant_land'] ?: null,
@@ -39,7 +40,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'ausland_ust_betrag' => $_POST['ausland_ust_betrag'] ?: null
         ];
         
-        if (saveRechnung($data)) {
+        if ($data['bezahlt'] && !$data['bezahlt_am']) {
+            setFlashMessage('danger', '"Bezahlt am" muss gesetzt sein, wenn die Rechnung als bezahlt markiert wird (maßgeblich für U30/E1a).');
+        } elseif (saveRechnung($data)) {
             setFlashMessage('success', 'Rechnung erfolgreich gespeichert.');
             // Zurück zur gefilterten Liste mit korrekten Parameter-Namen
             $redirectParams = [];
@@ -95,7 +98,7 @@ if (isset($_GET['reset_filter'])) {
 $hasFilterParams = isset($_GET['typ']) || isset($_GET['jahr']) || isset($_GET['monat']) || 
                    isset($_GET['kategorie_id']) || isset($_GET['bezahlt']) || isset($_GET['suche']);
 
-if ($hasFilterParams) {
+if ($hasFilterParams && $action === 'list') {
     // Neue Filter aus GET übernehmen
     $filters = [
         'typ' => $_GET['typ'] ?? '',
@@ -282,13 +285,15 @@ $rechnungen = getRechnungen($filters);
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <label class="form-label required">Datum</label>
-                                    <input type="date" class="form-control" name="datum" 
+                                    <input type="date" class="form-control" name="datum"
                                            value="<?= $rechnung['datum'] ?? date('Y-m-d') ?>" required>
+                                    <div class="form-text">Rechnungsdatum – rein informativ, fließt nicht in U30/E1a ein</div>
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Fällig am</label>
-                                    <input type="date" class="form-control" name="faellig_am" 
+                                    <input type="date" class="form-control" name="faellig_am"
                                            value="<?= $rechnung['faellig_am'] ?? '' ?>">
+                                    <div class="form-text">Zahlungsziel laut Rechnung – rein informativ, ohne steuerliche Wirkung</div>
                                 </div>
                             </div>
 
@@ -342,7 +347,7 @@ $rechnungen = getRechnungen($filters);
                             </div>
 
                             <div class="row mb-3">
-                                <div class="col-md-6">
+                                <div class="col-md-4">
                                     <label class="form-label">Kategorie</label>
                                     <select class="form-select" name="kategorie_id" id="kategorie_id">
                                         <option value="">-- Wählen --</option>
@@ -355,6 +360,20 @@ $rechnungen = getRechnungen($filters);
                                     </select>
                                 </div>
                                 <div class="col-md-3">
+                                    <label class="form-label">Zahlungsart</label>
+                                    <select class="form-select" name="zahlungsart">
+                                        <option value="bankueberweisung" <?= ($rechnung['zahlungsart'] ?? 'bankueberweisung') === 'bankueberweisung' ? 'selected' : '' ?>>
+                                            🏦 Banküberweisung
+                                        </option>
+                                        <option value="bar" <?= ($rechnung['zahlungsart'] ?? '') === 'bar' ? 'selected' : '' ?>>
+                                            💵 Barzahlung
+                                        </option>
+                                        <option value="sonstige" <?= ($rechnung['zahlungsart'] ?? '') === 'sonstige' ? 'selected' : '' ?>>
+                                            Sonstige
+                                        </option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
                                     <label class="form-label">Status</label>
                                     <div class="form-check mt-2">
                                         <input type="checkbox" class="form-check-input" name="bezahlt" id="bezahlt" value="1"
@@ -363,9 +382,11 @@ $rechnungen = getRechnungen($filters);
                                     </div>
                                 </div>
                                 <div class="col-md-3">
-                                    <label class="form-label">Bezahlt am</label>
-                                    <input type="date" class="form-control" name="bezahlt_am" 
-                                           value="<?= $rechnung['bezahlt_am'] ?? '' ?>">
+                                    <label class="form-label" id="bezahlt_am_label">Bezahlt am</label>
+                                    <input type="date" class="form-control" name="bezahlt_am" id="bezahlt_am"
+                                           value="<?= $rechnung['bezahlt_am'] ?? '' ?>"
+                                           <?= ($rechnung['bezahlt'] ?? 0) ? 'required' : '' ?>>
+                                    <div class="form-text">Maßgeblich für U30 und E1a (Ist-Besteuerung)</div>
                                 </div>
                             </div>
 
@@ -516,7 +537,7 @@ $rechnungen = getRechnungen($filters);
                                         <th class="text-end">Netto</th>
                                         <th class="text-end">USt</th>
                                         <th class="text-end">Brutto</th>
-                                        <th>Status</th>
+                                        <th>Zahlung</th>
                                         <th class="text-end">Aktionen</th>
                                     </tr>
                                 </thead>
@@ -554,6 +575,14 @@ $rechnungen = getRechnungen($filters);
                                                 <span class="badge bg-success"><i class="bi bi-check"></i></span>
                                             <?php else: ?>
                                                 <span class="badge bg-warning text-dark"><i class="bi bi-clock"></i></span>
+                                            <?php endif; ?>
+                                            <br>
+                                            <?php if (($r['zahlungsart'] ?? 'bankueberweisung') === 'bar'): ?>
+                                                <small class="text-muted"><i class="bi bi-cash-coin me-1"></i>Bar</small>
+                                            <?php elseif (($r['zahlungsart'] ?? '') === 'sonstige'): ?>
+                                                <small class="text-muted"><i class="bi bi-three-dots me-1"></i>Sonstige</small>
+                                            <?php else: ?>
+                                                <small class="text-muted"><i class="bi bi-bank2 me-1"></i>Überweisung</small>
                                             <?php endif; ?>
                                         </td>
                                         <td class="text-end">
@@ -621,7 +650,19 @@ $rechnungen = getRechnungen($filters);
         document.getElementById('netto_betrag')?.addEventListener('input', berechnebrutto);
         document.getElementById('ust_satz_id')?.addEventListener('change', berechnebrutto);
         document.getElementById('ausland_ust_satz')?.addEventListener('input', berechnebrutto);
-        
+
+        // "Bezahlt am" ist Pflichtfeld, sobald "Bezahlt" angehakt ist (maßgeblich für U30/E1a)
+        function toggleBezahltAmRequired() {
+            const bezahlt = document.getElementById('bezahlt');
+            const bezahltAm = document.getElementById('bezahlt_am');
+            if (!bezahlt || !bezahltAm) return;
+            bezahltAm.required = bezahlt.checked;
+            if (bezahlt.checked && !bezahltAm.value) {
+                bezahltAm.value = new Date().toISOString().slice(0, 10);
+            }
+        }
+        document.getElementById('bezahlt')?.addEventListener('change', toggleBezahltAmRequired);
+
         // Buchungsart-Logik
         const buchungsartInfos = {
             'inland': 'Inland: Normale Buchung mit österreichischer USt',

@@ -4,6 +4,9 @@
  * Buchhaltungs-App für Österreich
  */
 
+ini_set('default_charset', 'UTF-8');
+header('Content-Type: text/html; charset=UTF-8');
+
 define('DB_HOST', 'localhost');
 define('DB_NAME', 'ekassa360');
 define('DB_USER', 'root');

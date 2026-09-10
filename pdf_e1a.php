@@ -38,7 +38,19 @@ $afaBuchungen = getAfaBuchungenJahr($jahr);
 class E1a_PDF extends FPDF {
     protected $firma;
     protected $jahr;
-    
+
+    private function enc($str) {
+        return iconv('UTF-8', 'ISO-8859-1//TRANSLIT', (string)$str);
+    }
+
+    function Cell($w, $h=0, $txt='', $border=0, $ln=0, $align='', $fill=false, $link='') {
+        parent::Cell($w, $h, $this->enc($txt), $border, $ln, $align, $fill, $link);
+    }
+
+    function MultiCell($w, $h, $txt, $border=0, $align='J', $fill=false) {
+        parent::MultiCell($w, $h, $this->enc($txt), $border, $align, $fill);
+    }
+
     function setFirma($firma) {
         $this->firma = $firma;
     }
