@@ -18,6 +18,42 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
         </ul>
 
         <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted text-uppercase">
+            <span>Verkauf</span>
+        </h6>
+        <ul class="nav flex-column mb-2">
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'kunden' ? 'active' : '' ?>" href="kunden.php">
+                    <i class="bi bi-person-vcard me-2"></i>Kunden
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'artikel' ? 'active' : '' ?>" href="artikel.php">
+                    <i class="bi bi-box-seam me-2"></i>Artikel
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'angebote' ? 'active' : '' ?>" href="angebote.php">
+                    <i class="bi bi-file-earmark-text me-2"></i>Angebote
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'auftraege' ? 'active' : '' ?>" href="auftraege.php">
+                    <i class="bi bi-clipboard-check me-2"></i>Aufträge
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'verkaufsrechnungen' ? 'active' : '' ?>" href="verkaufsrechnungen.php">
+                    <i class="bi bi-receipt-cutoff me-2"></i>Verkaufsrechnungen
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'wiederkehrende_rechnungen' ? 'active' : '' ?>" href="wiederkehrende_rechnungen.php">
+                    <i class="bi bi-arrow-repeat me-2"></i>Wiederkehrende Rechnungen
+                </a>
+            </li>
+        </ul>
+
+        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted text-uppercase">
             <span>Steuern</span>
         </h6>
         <ul class="nav flex-column mb-2">

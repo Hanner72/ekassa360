@@ -257,6 +257,11 @@ function saveRechnung($data) {
     $ausland_ust_satz = !empty($data['ausland_ust_satz']) ? str_replace(',', '.', $data['ausland_ust_satz']) : null;
     $ausland_ust_betrag = !empty($data['ausland_ust_betrag']) ? str_replace(',', '.', $data['ausland_ust_betrag']) : null;
     
+    // Verkauf-Modul: optionale Verknüpfung zu einem Verkaufsdokument / paperless-Dokument
+    // (Pass-through, Default null - bestehende Aufrufe aus rechnungen.php bleiben unverändert)
+    $verkaufsdokument_id = $data['verkaufsdokument_id'] ?? null;
+    $paperless_document_id = $data['paperless_document_id'] ?? null;
+
     if (!empty($data['id'])) {
         // Update
         $stmt = $db->prepare("UPDATE rechnungen SET
@@ -264,7 +269,8 @@ function saveRechnung($data) {
             kunde_lieferant = ?, beschreibung = ?, netto_betrag = ?,
             ust_satz_id = ?, ust_betrag = ?, brutto_betrag = ?,
             kategorie_id = ?, bezahlt = ?, bezahlt_am = ?, zahlungsart = ?, notizen = ?, geaendert_von = ?,
-            buchungsart = ?, lieferant_land = ?, lieferant_uid = ?, ausland_ust_satz = ?, ausland_ust_betrag = ?
+            buchungsart = ?, lieferant_land = ?, lieferant_uid = ?, ausland_ust_satz = ?, ausland_ust_betrag = ?,
+            verkaufsdokument_id = ?, paperless_document_id = ?
             WHERE id = ?");
         $result = $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
@@ -273,11 +279,12 @@ function saveRechnung($data) {
             $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null,
             $data['zahlungsart'] ?? 'bankueberweisung', $data['notizen'],
             $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag,
+            $verkaufsdokument_id, $paperless_document_id,
             $data['id']
         ]);
-        
+
         if ($result && function_exists('logAction')) {
-            logAction('rechnungen', $data['id'], 'geaendert', 
+            logAction('rechnungen', $data['id'], 'geaendert',
                       $data['typ'] . ': ' . $data['kunde_lieferant'] . ' - ' . number_format($bruttoBetrag, 2) . ' €');
         }
         return $result;
@@ -286,15 +293,17 @@ function saveRechnung($data) {
         $stmt = $db->prepare("INSERT INTO rechnungen
             (typ, rechnungsnummer, buchungsnummer, datum, faellig_am, kunde_lieferant, beschreibung,
              netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, kategorie_id, bezahlt, bezahlt_am, zahlungsart, notizen, erstellt_von,
-             buchungsart, lieferant_land, lieferant_uid, ausland_ust_satz, ausland_ust_betrag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+             buchungsart, lieferant_land, lieferant_uid, ausland_ust_satz, ausland_ust_betrag,
+             verkaufsdokument_id, paperless_document_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
             $data['kunde_lieferant'], $data['beschreibung'], $data['netto_betrag'],
             $data['ust_satz_id'] ?: null, $ustBetrag, $bruttoBetrag,
             $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null,
             $data['zahlungsart'] ?? 'bankueberweisung', $data['notizen'],
-            $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag
+            $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag,
+            $verkaufsdokument_id, $paperless_document_id
         ]);
         $id = $db->lastInsertId();
         
@@ -342,6 +351,30 @@ function deleteRechnung($id) {
     
     $stmt = $db->prepare("DELETE FROM rechnungen WHERE id = ?");
     return $stmt->execute([$id]);
+}
+
+/**
+ * Zahlungsstatus einer Ledger-Zeile aktualisieren (z.B. "Als bezahlt markieren").
+ * Maßgeblich für U30/E1a (Ist-Besteuerung) - siehe berechneUstVoranmeldung()/berechneEinkommensteuer().
+ */
+function updateRechnungZahlung($id, $bezahlt, $bezahlt_am, $zahlungsart) {
+    $db = db();
+    $benutzer_id = $_SESSION['benutzer_id'] ?? null;
+
+    $stmt = $db->prepare("UPDATE rechnungen SET bezahlt = ?, bezahlt_am = ?, zahlungsart = ?, geaendert_von = ? WHERE id = ?");
+    $result = $stmt->execute([
+        $bezahlt ? 1 : 0,
+        $bezahlt ? ($bezahlt_am ?: null) : null,
+        $zahlungsart ?? 'bankueberweisung',
+        $benutzer_id,
+        $id
+    ]);
+
+    if ($result && function_exists('logAction')) {
+        logAction('rechnungen', $id, 'geaendert', $bezahlt ? 'Als bezahlt markiert' : 'Zahlung zurückgesetzt');
+    }
+
+    return $result;
 }
 
 // ============================================

@@ -6,6 +6,7 @@ session_start();
 require_once 'config/database.php';
 require_once 'includes/functions.php';
 require_once 'includes/auth.php';
+require_once 'includes/paperless.php';
 
 requireLogin();
 
@@ -37,7 +38,8 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'lieferant_land' => $_POST['lieferant_land'] ?: null,
             'lieferant_uid' => $_POST['lieferant_uid'] ?: null,
             'ausland_ust_satz' => $_POST['ausland_ust_satz'] ?: null,
-            'ausland_ust_betrag' => $_POST['ausland_ust_betrag'] ?: null
+            'ausland_ust_betrag' => $_POST['ausland_ust_betrag'] ?: null,
+            'paperless_document_id' => ($_POST['paperless_document_id'] ?? '') !== '' ? $_POST['paperless_document_id'] : null
         ];
         
         if ($data['bezahlt'] && !$data['bezahlt_am']) {
@@ -308,6 +310,29 @@ $rechnungen = getRechnungen($filters);
                                     <?php endforeach; ?>
                                 </datalist>
                             </div>
+
+                            <?php if (paperlessConfigured()): ?>
+                            <div class="mb-3">
+                                <label class="form-label">Beleg aus paperless-ngx verknüpfen</label>
+                                <input type="hidden" name="paperless_document_id" id="paperless_document_id"
+                                       value="<?= htmlspecialchars($rechnung['paperless_document_id'] ?? '') ?>">
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                    <input type="text" class="form-control" id="paperless_suche" autocomplete="off"
+                                           placeholder="Titel/Inhalt in paperless-ngx suchen...">
+                                    <?php if (!empty($rechnung['paperless_document_id'])): ?>
+                                    <a href="paperless_proxy.php?id=<?= (int)$rechnung['paperless_document_id'] ?>" target="_blank" class="btn btn-outline-secondary">
+                                        <i class="bi bi-eye me-1"></i>Beleg ansehen
+                                    </a>
+                                    <button type="button" class="btn btn-outline-danger" onclick="entferneBeleg()"><i class="bi bi-x-lg"></i></button>
+                                    <?php endif; ?>
+                                </div>
+                                <div id="paperless_ergebnisse" class="list-group mt-1"></div>
+                                <div id="paperless_ausgewaehlt" class="form-text <?= empty($rechnung['paperless_document_id']) ? 'd-none' : '' ?>">
+                                    <i class="bi bi-paperclip"></i> Beleg #<span id="paperless_ausgewaehlt_id"><?= (int)($rechnung['paperless_document_id'] ?? 0) ?></span> verknüpft
+                                </div>
+                            </div>
+                            <?php endif; ?>
 
                             <div class="mb-3">
                                 <label class="form-label">Beschreibung</label>
@@ -755,6 +780,54 @@ $rechnungen = getRechnungen($filters);
             updateBuchungsart();
             berechnebrutto();
         });
+
+        // paperless-Belegsuche (Live-Suche, debounced)
+        let paperlessSucheTimeout = null;
+        const paperlessSucheFeld = document.getElementById('paperless_suche');
+        if (paperlessSucheFeld) {
+            paperlessSucheFeld.addEventListener('input', function() {
+                clearTimeout(paperlessSucheTimeout);
+                const q = this.value.trim();
+                const ergebnisse = document.getElementById('paperless_ergebnisse');
+                if (q.length < 2) {
+                    ergebnisse.innerHTML = '';
+                    return;
+                }
+                paperlessSucheTimeout = setTimeout(() => {
+                    fetch('paperless_search.php?q=' + encodeURIComponent(q))
+                        .then(r => r.json())
+                        .then(data => {
+                            ergebnisse.innerHTML = '';
+                            (data.results || []).forEach(doc => {
+                                const item = document.createElement('button');
+                                item.type = 'button';
+                                item.className = 'list-group-item list-group-item-action';
+                                item.textContent = doc.title + (doc.correspondent ? ' - ' + doc.correspondent : '');
+                                item.onclick = () => waehleBeleg(doc.id, doc.title);
+                                ergebnisse.appendChild(item);
+                            });
+                        })
+                        .catch(() => { ergebnisse.innerHTML = '<div class="text-danger small">Suche fehlgeschlagen.</div>'; });
+                }, 400);
+            });
+        }
+
+        function waehleBeleg(id, title) {
+            document.getElementById('paperless_document_id').value = id;
+            document.getElementById('paperless_ergebnisse').innerHTML = '';
+            document.getElementById('paperless_suche').value = '';
+            const info = document.getElementById('paperless_ausgewaehlt');
+            if (info) {
+                info.classList.remove('d-none');
+                document.getElementById('paperless_ausgewaehlt_id').textContent = id;
+            }
+        }
+
+        function entferneBeleg() {
+            document.getElementById('paperless_document_id').value = '';
+            const info = document.getElementById('paperless_ausgewaehlt');
+            if (info) info.classList.add('d-none');
+        }
     </script>
 </body>
 </html>

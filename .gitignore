@@ -1,1 +1,8 @@
 *.zip
+
+# Verkauf-Modul: sensible paperless-ngx-Zugangsdaten und lokal generierte PDFs
+config/paperless.php
+storage/
+
+# Verkauf-Modul: sensible SMTP-Zugangsdaten für den E-Mail-Versand
+config/mail.php

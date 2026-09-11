@@ -7,6 +7,8 @@ session_start();
 require_once 'config/database.php';
 require_once 'includes/functions.php';
 require_once 'includes/auth.php';
+require_once 'includes/verkauf_functions.php';
+require_once 'includes/verkauf_pdf.php';
 
 requireLogin();
 
@@ -21,39 +23,69 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     
     // Firmendaten speichern
     if (isset($_POST['save_firma'])) {
-        $stmt = $db->query("SELECT id FROM firma LIMIT 1");
+        $stmt = $db->query("SELECT id, logo_data, logo_mime FROM firma LIMIT 1");
         $existing = $stmt->fetch();
-        
+
+        // Logo: bestehendes beibehalten, außer neuer Upload oder explizites Entfernen
+        $logoData = $existing['logo_data'] ?? null;
+        $logoMime = $existing['logo_mime'] ?? null;
+
+        if (!empty($_POST['logo_entfernen'])) {
+            $logoData = null;
+            $logoMime = null;
+        } elseif (!empty($_FILES['logo']['tmp_name']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
+            $erlaubteMimes = ['image/png', 'image/jpeg', 'image/gif'];
+            $maxBytes = 2 * 1024 * 1024;
+            $bildinfo = @getimagesize($_FILES['logo']['tmp_name']);
+
+            if ($_FILES['logo']['size'] > $maxBytes) {
+                setFlashMessage('danger', 'Logo ist zu groß (max. 2 MB).');
+                header('Location: einstellungen.php?tab=firma');
+                exit;
+            }
+            if (!$bildinfo || !in_array($bildinfo['mime'], $erlaubteMimes, true)) {
+                setFlashMessage('danger', 'Logo muss ein PNG-, JPEG- oder GIF-Bild sein.');
+                header('Location: einstellungen.php?tab=firma');
+                exit;
+            }
+
+            $logoData = base64_encode(file_get_contents($_FILES['logo']['tmp_name']));
+            $logoMime = $bildinfo['mime'];
+        }
+
         if ($existing) {
-            $stmt = $db->prepare("UPDATE firma SET 
+            $stmt = $db->prepare("UPDATE firma SET
                 name = ?, strasse = ?, plz = ?, ort = ?, telefon = ?, email = ?, website = ?,
+                logo_data = ?, logo_mime = ?,
                 uid_nummer = ?, steuernummer = ?, finanzamt = ?, iban = ?, bic = ?, bank = ?,
                 geschaeftsjahr_beginn = ?, ust_periode = ?, kleinunternehmer = ?
                 WHERE id = ?");
             $stmt->execute([
                 $_POST['name'], $_POST['strasse'], $_POST['plz'], $_POST['ort'],
                 $_POST['telefon'], $_POST['email'], $_POST['website'],
+                $logoData, $logoMime,
                 $_POST['uid_nummer'], $_POST['steuernummer'], $_POST['finanzamt'],
                 $_POST['iban'], $_POST['bic'], $_POST['bank'],
-                $_POST['geschaeftsjahr_beginn'], $_POST['ust_periode'], 
+                $_POST['geschaeftsjahr_beginn'], $_POST['ust_periode'],
                 isset($_POST['kleinunternehmer']) ? 1 : 0,
                 $existing['id']
             ]);
         } else {
-            $stmt = $db->prepare("INSERT INTO firma 
-                (name, strasse, plz, ort, telefon, email, website, uid_nummer, steuernummer, 
+            $stmt = $db->prepare("INSERT INTO firma
+                (name, strasse, plz, ort, telefon, email, website, logo_data, logo_mime, uid_nummer, steuernummer,
                  finanzamt, iban, bic, bank, geschaeftsjahr_beginn, ust_periode, kleinunternehmer)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([
                 $_POST['name'], $_POST['strasse'], $_POST['plz'], $_POST['ort'],
                 $_POST['telefon'], $_POST['email'], $_POST['website'],
+                $logoData, $logoMime,
                 $_POST['uid_nummer'], $_POST['steuernummer'], $_POST['finanzamt'],
                 $_POST['iban'], $_POST['bic'], $_POST['bank'],
-                $_POST['geschaeftsjahr_beginn'], $_POST['ust_periode'], 
+                $_POST['geschaeftsjahr_beginn'], $_POST['ust_periode'],
                 isset($_POST['kleinunternehmer']) ? 1 : 0
             ]);
         }
-        
+
         setFlashMessage('success', 'Firmendaten gespeichert.');
         header('Location: einstellungen.php?tab=firma');
         exit;
@@ -105,6 +137,63 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $db->prepare("DELETE FROM kategorien WHERE id = ?")->execute([$_POST['id']]);
         setFlashMessage('success', 'Kategorie gelöscht.');
         header('Location: einstellungen.php?tab=kategorien');
+        exit;
+    }
+
+    // Nummernkreis speichern (Verkauf-Modul: Angebote/Aufträge/Rechnungen)
+    if (isset($_POST['save_nummernkreis'])) {
+        $id = $_POST['id'] ?? null;
+        $format = trim($_POST['format'] ?? '');
+        $naechsteNummer = max(1, (int)($_POST['naechste_nummer'] ?? 1));
+
+        if ($format === '' || !preg_match('/\{N+\}/', $format)) {
+            setFlashMessage('danger', 'Das Format muss mindestens einen Nummern-Platzhalter enthalten, z.B. {NNNN}.');
+            header('Location: einstellungen.php?tab=nummernkreise' . (!empty($id) ? "&action=edit&id=$id" : '&action=new'));
+            exit;
+        }
+
+        if (!empty($id)) {
+            // Schlüssel/Jahr bleiben fix - nur Format und nächste Nummer sind änderbar
+            $stmt = $db->prepare("UPDATE nummernkreise SET format = ?, naechste_nummer = ? WHERE id = ?");
+            $stmt->execute([$format, $naechsteNummer, $id]);
+            if (function_exists('logAction')) {
+                logAction('nummernkreise', $id, 'geaendert', "Nummernkreis angepasst: Format '$format', nächste Nummer $naechsteNummer");
+            }
+        } else {
+            $schluessel = $_POST['schluessel'] ?? 'rechnung';
+            $jahr = (int)($_POST['jahr'] ?? date('Y'));
+            try {
+                $stmt = $db->prepare("INSERT INTO nummernkreise (schluessel, jahr, format, naechste_nummer) VALUES (?, ?, ?, ?)");
+                $stmt->execute([$schluessel, $jahr, $format, $naechsteNummer]);
+                if (function_exists('logAction')) {
+                    logAction('nummernkreise', $db->lastInsertId(), 'erstellt', "Nummernkreis angelegt: $schluessel $jahr");
+                }
+            } catch (PDOException $e) {
+                setFlashMessage('danger', "Für $schluessel/$jahr existiert bereits ein Nummernkreis.");
+                header('Location: einstellungen.php?tab=nummernkreise');
+                exit;
+            }
+        }
+        setFlashMessage('success', 'Nummernkreis gespeichert.');
+        header('Location: einstellungen.php?tab=nummernkreise');
+        exit;
+    }
+
+    // PDF-Vorlage speichern (Angebot/Auftrag/Rechnung)
+    if (isset($_POST['save_pdf_vorlage'])) {
+        $pdfTyp = $_POST['typ'] ?? 'rechnung';
+        savePdfVorlage($pdfTyp, $_POST['vorlage'] ?? '', $_SESSION['benutzer_id'] ?? null);
+        setFlashMessage('success', 'PDF-Vorlage gespeichert.');
+        header('Location: einstellungen.php?tab=pdf_design&typ=' . urlencode($pdfTyp));
+        exit;
+    }
+
+    // PDF-Vorlage auf Standard zurücksetzen
+    if (isset($_POST['reset_pdf_vorlage'])) {
+        $pdfTyp = $_POST['typ'] ?? 'rechnung';
+        savePdfVorlage($pdfTyp, standardPdfVorlage($pdfTyp), $_SESSION['benutzer_id'] ?? null);
+        setFlashMessage('success', 'PDF-Vorlage auf Standard zurückgesetzt.');
+        header('Location: einstellungen.php?tab=pdf_design&typ=' . urlencode($pdfTyp));
         exit;
     }
     
@@ -279,6 +368,25 @@ if ($id && $tab === 'kategorien') {
     $kategorie = $stmt->fetch();
 }
 
+$nummernkreise = [];
+$nummernkreis = null;
+if ($tab === 'nummernkreise') {
+    $nummernkreise = $db->query("SELECT * FROM nummernkreise ORDER BY jahr DESC, schluessel")->fetchAll();
+    if ($id) {
+        $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE id = ?");
+        $stmt->execute([$id]);
+        $nummernkreis = $stmt->fetch();
+    }
+}
+$nummernkreisLabels = ['rechnung' => 'Rechnung', 'angebot' => 'Angebot', 'auftrag' => 'Auftrag'];
+$pdfDesignTypen = $nummernkreisLabels + ['lieferschein' => 'Lieferschein'];
+
+$pdfDesignTyp = $_GET['typ'] ?? 'rechnung';
+if (!array_key_exists($pdfDesignTyp, $pdfDesignTypen)) {
+    $pdfDesignTyp = 'rechnung';
+}
+$pdfVorlageInhalt = $tab === 'pdf_design' ? getPdfVorlage($pdfDesignTyp) : '';
+
 // E1a Kennzahlen
 $e1aKennzahlen = [
     'Einnahmen' => ['9040' => 'Erlöse Waren', '9050' => 'Erlöse Dienstleistungen', '9060' => 'Anlagenerträge', '9090' => 'Übrige Erträge'],
@@ -326,6 +434,16 @@ $e1aKennzahlen = [
                         </a>
                     </li>
                     <li class="nav-item">
+                        <a class="nav-link <?= $tab === 'nummernkreise' ? 'active' : '' ?>" href="?tab=nummernkreise">
+                            <i class="bi bi-123 me-1"></i>Nummernkreise
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $tab === 'pdf_design' ? 'active' : '' ?>" href="?tab=pdf_design&typ=<?= $pdfDesignTyp ?>">
+                            <i class="bi bi-file-earmark-pdf me-1"></i>PDF-Design
+                        </a>
+                    </li>
+                    <li class="nav-item">
                         <a class="nav-link <?= $tab === 'hilfe' ? 'active' : '' ?>" href="?tab=hilfe">
                             <i class="bi bi-question-circle me-1"></i>Kennzahlen
                         </a>
@@ -339,7 +457,7 @@ $e1aKennzahlen = [
 
                 <?php if ($tab === 'firma'): ?>
                 <!-- FIRMA -->
-                <form method="POST">
+                <form method="POST" enctype="multipart/form-data">
                     <div class="row">
                         <div class="col-lg-6">
                             <div class="card mb-4">
@@ -379,6 +497,28 @@ $e1aKennzahlen = [
                                         <label class="form-label">Website</label>
                                         <input type="url" class="form-control" name="website" value="<?= htmlspecialchars($firma['website'] ?? '') ?>" placeholder="https://">
                                     </div>
+                                </div>
+                            </div>
+
+                            <div class="card mb-4">
+                                <div class="card-header">
+                                    <i class="bi bi-image me-2"></i>Logo
+                                </div>
+                                <div class="card-body">
+                                    <?php if (!empty($firma['logo_data'])): ?>
+                                    <div class="mb-3">
+                                        <img src="data:<?= htmlspecialchars($firma['logo_mime']) ?>;base64,<?= $firma['logo_data'] ?>" style="max-height: 80px; max-width: 100%;" alt="Firmenlogo">
+                                    </div>
+                                    <div class="form-check mb-3">
+                                        <input type="checkbox" class="form-check-input" name="logo_entfernen" id="logo_entfernen" value="1">
+                                        <label class="form-check-label" for="logo_entfernen">Logo entfernen</label>
+                                    </div>
+                                    <div class="form-text mb-2">Neue Datei wählen, um das Logo zu ersetzen:</div>
+                                    <?php else: ?>
+                                    <p class="text-muted small">Noch kein Logo hinterlegt.</p>
+                                    <?php endif; ?>
+                                    <input type="file" class="form-control" name="logo" accept="image/png,image/jpeg,image/gif">
+                                    <div class="form-text">PNG, JPEG oder GIF, max. 2 MB. Wird in den PDF-Vorlagen über den Platzhalter <code>{{firma_logo}}</code> eingebunden.</div>
                                 </div>
                             </div>
                         </div>
@@ -614,6 +754,194 @@ $e1aKennzahlen = [
                     </table>
                 </div>
                 <?php endif; ?>
+
+                <?php elseif ($tab === 'nummernkreise'): ?>
+                <!-- NUMMERNKREISE (Verkauf-Modul: Angebote/Aufträge/Rechnungen) -->
+                <?php if ($action === 'edit' || $action === 'new'): ?>
+                <div class="card">
+                    <div class="card-header"><?= $action === 'new' ? 'Neuer Nummernkreis' : 'Nummernkreis bearbeiten' ?></div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <input type="hidden" name="id" value="<?= $nummernkreis['id'] ?? '' ?>">
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Dokumenttyp *</label>
+                                    <?php if ($action === 'edit'): ?>
+                                    <input type="text" class="form-control" value="<?= $nummernkreisLabels[$nummernkreis['schluessel']] ?? $nummernkreis['schluessel'] ?>" disabled>
+                                    <?php else: ?>
+                                    <select class="form-select" name="schluessel" required>
+                                        <?php foreach ($nummernkreisLabels as $val => $label): ?>
+                                        <option value="<?= $val ?>"><?= $label ?></option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Jahr *</label>
+                                    <?php if ($action === 'edit'): ?>
+                                    <input type="text" class="form-control" value="<?= $nummernkreis['jahr'] ?>" disabled>
+                                    <?php else: ?>
+                                    <input type="number" class="form-control" name="jahr" value="<?= date('Y') ?>" required>
+                                    <?php endif; ?>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Nächste Nummer *</label>
+                                    <input type="number" class="form-control" id="nk_naechste_nummer" name="naechste_nummer" min="1" value="<?= $nummernkreis['naechste_nummer'] ?? 1 ?>" required>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Format *</label>
+                                <input type="text" class="form-control font-monospace" id="nk_format" name="format"
+                                       value="<?= htmlspecialchars($nummernkreis['format'] ?? 'RE-{JJJJ}-{NNNN}') ?>" required>
+                                <div class="form-text">
+                                    Platzhalter: <code>{JJJJ}</code> Jahr 4-stellig, <code>{JJ}</code> Jahr 2-stellig,
+                                    <code>{MM}</code> Monat, <code>{TT}</code> Tag (jeweils vom Belegdatum) ·
+                                    <code>{NNNN}</code> laufende Nummer (Anzahl der <code>N</code> = Anzahl Stellen, z.B. <code>{NNN}</code> = 3-stellig)
+                                </div>
+                            </div>
+                            <div class="alert alert-secondary">
+                                Vorschau der nächsten Nummer: <code id="nk_vorschau" class="fs-6"></code>
+                            </div>
+                            <div class="alert alert-warning">
+                                <i class="bi bi-exclamation-triangle me-1"></i>
+                                Vorsicht beim nachträglichen Ändern der "Nächsten Nummer": Wird sie auf einen bereits vergebenen Wert zurückgesetzt,
+                                entsteht bei der nächsten Finalisierung eine doppelt vergebene Rechnungsnummer.
+                            </div>
+                            <button type="submit" name="save_nummernkreis" class="btn btn-success">Speichern</button>
+                            <a href="?tab=nummernkreise" class="btn btn-secondary">Abbrechen</a>
+                        </form>
+                    </div>
+                </div>
+                <script>
+                    function nkAktualisiereVorschau() {
+                        const heute = new Date();
+                        const jjjj = String(heute.getFullYear());
+                        const jj = jjjj.slice(-2);
+                        const mm = String(heute.getMonth() + 1).padStart(2, '0');
+                        const tt = String(heute.getDate()).padStart(2, '0');
+                        let format = document.getElementById('nk_format').value;
+                        const nummer = parseInt(document.getElementById('nk_naechste_nummer').value || '1', 10);
+
+                        let vorschau = format
+                            .replaceAll('{JJJJ}', jjjj)
+                            .replaceAll('{JJ}', jj)
+                            .replaceAll('{MM}', mm)
+                            .replaceAll('{TT}', tt);
+                        vorschau = vorschau.replace(/\{(N+)\}/g, (m, ns) => String(nummer).padStart(ns.length, '0'));
+                        document.getElementById('nk_vorschau').textContent = vorschau || '-';
+                    }
+                    document.getElementById('nk_format').addEventListener('input', nkAktualisiereVorschau);
+                    document.getElementById('nk_naechste_nummer').addEventListener('input', nkAktualisiereVorschau);
+                    nkAktualisiereVorschau();
+                </script>
+                <?php else: ?>
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between">
+                        <span><i class="bi bi-123 me-2"></i>Nummernkreise (Verkauf-Modul)</span>
+                        <a href="?tab=nummernkreise&action=new" class="btn btn-light btn-sm">+ Neu</a>
+                    </div>
+                    <table class="table table-hover mb-0">
+                        <thead><tr><th>Dokumenttyp</th><th class="text-center">Jahr</th><th>Format</th><th class="text-center">Nächste Nummer</th><th>Vorschau</th><th></th></tr></thead>
+                        <tbody>
+                        <?php if (empty($nummernkreise)): ?>
+                        <tr><td colspan="6" class="text-center text-muted py-4">Noch keine Nummernkreise vorhanden</td></tr>
+                        <?php else: foreach ($nummernkreise as $nk): ?>
+                        <tr>
+                            <td><?= $nummernkreisLabels[$nk['schluessel']] ?? htmlspecialchars($nk['schluessel']) ?></td>
+                            <td class="text-center"><?= $nk['jahr'] ?></td>
+                            <td><code><?= htmlspecialchars($nk['format']) ?></code></td>
+                            <td class="text-center"><span class="badge bg-primary"><?= $nk['naechste_nummer'] ?></span></td>
+                            <td><code><?= htmlspecialchars(formatiereNummernkreisNummer($nk['format'], date('Y-m-d'), $nk['naechste_nummer'])) ?></code></td>
+                            <td class="text-end">
+                                <a href="?tab=nummernkreise&action=edit&id=<?= $nk['id'] ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+                            </td>
+                        </tr>
+                        <?php endforeach; endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <div class="alert alert-info mt-3">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Für jedes Jahr wird beim ersten Finalisieren eines Dokumenttyps automatisch ein neuer Nummernkreis
+                    angelegt (Standard-Format <code>RE-{JJJJ}-{NNNN}</code>, Start bei 1), falls noch keiner existiert.
+                    Hier kannst du Format und Startwert pro Jahr im Voraus selbst festlegen oder nachträglich korrigieren.
+                </div>
+                <?php endif; ?>
+
+                <?php elseif ($tab === 'pdf_design'): ?>
+                <!-- PDF-DESIGN (Angebot/Auftrag/Rechnung/Lieferschein: HTML/CSS-Vorlagen-Editor) -->
+                <ul class="nav nav-pills mb-3">
+                    <?php foreach ($pdfDesignTypen as $val => $label): ?>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $pdfDesignTyp === $val ? 'active' : '' ?>" href="?tab=pdf_design&typ=<?= $val ?>"><?= $label ?></a>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+
+                <div class="row">
+                    <div class="col-lg-8">
+                        <form method="POST">
+                            <input type="hidden" name="typ" value="<?= $pdfDesignTyp ?>">
+                            <div class="mb-2 d-flex justify-content-between align-items-center">
+                                <label class="form-label mb-0">HTML/CSS-Vorlage</label>
+                                <div>
+                                    <button type="submit" name="save_pdf_vorlage" class="btn btn-success btn-sm">
+                                        <i class="bi bi-check-lg me-1"></i>Speichern
+                                    </button>
+                                </div>
+                            </div>
+                            <textarea class="form-control font-monospace" id="vorlage_text" name="vorlage" rows="24" style="font-size: 0.85rem;" spellcheck="false"><?= htmlspecialchars($pdfVorlageInhalt) ?></textarea>
+                        </form>
+
+                        <div class="d-flex justify-content-between mt-2">
+                            <form method="POST" onsubmit="return confirm('Vorlage wirklich auf den Standard zurücksetzen? Eigene Änderungen gehen verloren.')">
+                                <input type="hidden" name="typ" value="<?= $pdfDesignTyp ?>">
+                                <button type="submit" name="reset_pdf_vorlage" class="btn btn-outline-danger btn-sm">
+                                    <i class="bi bi-arrow-counterclockwise me-1"></i>Auf Standard zurücksetzen
+                                </button>
+                            </form>
+                            <form method="POST" action="pdf_vorlage_preview.php?typ=<?= $pdfDesignTyp ?>" target="_blank" id="previewForm">
+                                <input type="hidden" name="vorlage" id="preview_vorlage_hidden">
+                                <button type="submit" class="btn btn-outline-primary btn-sm">
+                                    <i class="bi bi-eye me-1"></i>Vorschau (aktueller Textinhalt, auch ungespeichert)
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+
+                    <div class="col-lg-4">
+                        <div class="card">
+                            <div class="card-header"><i class="bi bi-code-slash me-2"></i>Platzhalter</div>
+                            <div class="card-body">
+                                <p class="small text-muted">Einfache <code>{{platzhalter}}</code>-Ersetzung, keine Schleifen. Bilder nur als Base64-Data-URI einbettbar (keine externen URLs).</p>
+                                <table class="table table-sm">
+                                    <tbody>
+                                        <tr><td><code>{{firma_logo}}</code></td><td class="small">Firmenlogo (falls in Firma-Einstellungen hochgeladen)</td></tr>
+                                        <tr><td><code>{{firma_name}}</code></td><td class="small">Firmenname</td></tr>
+                                        <tr><td><code>{{firma_adresse}}</code></td><td class="small">Straße, PLZ Ort</td></tr>
+                                        <tr><td><code>{{firma_uid}}</code></td><td class="small">UID-Nummer</td></tr>
+                                        <tr><td><code>{{firma_iban}}</code>, <code>{{firma_bic}}</code>, <code>{{firma_bank}}</code></td><td class="small">Bankdaten</td></tr>
+                                        <tr><td><code>{{dokument_typ_label}}</code></td><td class="small">"Angebot" / "Auftragsbestätigung" / "Rechnung"</td></tr>
+                                        <tr><td><code>{{nummer}}</code>, <code>{{status}}</code></td><td class="small">z.B. "RE-2026-0003", "entwurf"</td></tr>
+                                        <tr><td><code>{{datum}}</code>, <code>{{leistungsdatum}}</code>, <code>{{gueltig_bis}}</code>, <code>{{faellig_am}}</code></td><td class="small">Formatierte Daten</td></tr>
+                                        <tr><td><code>{{kunde_name}}</code>, <code>{{kunde_adresse}}</code>, <code>{{kunde_uid}}</code></td><td class="small">Kundendaten</td></tr>
+                                        <tr><td><code>{{betreff}}</code>, <code>{{einleitungstext}}</code>, <code>{{schlusstext}}</code></td><td class="small">Freitexte des Dokuments</td></tr>
+                                        <tr><td><code>{{positionen_tabelle}}</code></td><td class="small">Fertige Positions-Tabelle (Klasse <code>.positionen-tabelle</code>)</td></tr>
+                                        <tr><td><code>{{netto_gesamt}}</code>, <code>{{ust_gesamt}}</code>, <code>{{brutto_gesamt}}</code></td><td class="small">Rohe Summenwerte</td></tr>
+                                        <tr><td><code>{{summenblock}}</code></td><td class="small">Fertiger Summenblock (Kleinunternehmer-bewusst)</td></tr>
+                                        <tr><td><code>{{zahlungshinweis}}</code></td><td class="small">Nur Rechnung, nur wenn IBAN gesetzt</td></tr>
+                                        <tr><td><code>{{wasserzeichen}}</code></td><td class="small">Nur bei Status "entwurf"</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                    document.getElementById('previewForm').addEventListener('submit', function() {
+                        document.getElementById('preview_vorlage_hidden').value = document.getElementById('vorlage_text').value;
+                    });
+                </script>
 
                 <?php elseif ($tab === 'hilfe'): ?>
                 <!-- KENNZAHLEN-REFERENZ -->
