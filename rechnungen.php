@@ -7,6 +7,7 @@ require_once 'config/database.php';
 require_once 'includes/functions.php';
 require_once 'includes/auth.php';
 require_once 'includes/paperless.php';
+require_once 'includes/verkauf_functions.php';
 
 requireLogin();
 
@@ -62,6 +63,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     
+    if (isset($_POST['bezahlt_und_buchungsnummer'])) {
+        $result = markVerkaufsrechnungBezahltUndVergebeBuchungsnummer((int)$_POST['verkaufsdokument_id'], date('Y-m-d'), 'bankueberweisung');
+        if ($result['success']) {
+            $meldung = 'Als bezahlt markiert.';
+            if (!empty($result['buchungsnummern'])) {
+                $meldung .= ' Buchungsnummer' . (count($result['buchungsnummern']) > 1 ? 'n' : '') . ' ' . implode(', ', $result['buchungsnummern']) . ' vergeben.';
+            }
+            setFlashMessage('success', $meldung);
+        } else {
+            setFlashMessage('danger', $result['message']);
+        }
+        $redirectParams = [];
+        if (!empty($_SESSION['rechnungen_filter'])) {
+            foreach ($_SESSION['rechnungen_filter'] as $key => $value) {
+                if ($value !== '' && $value !== null) {
+                    $redirectParams[$key] = $value;
+                }
+            }
+        }
+        header('Location: rechnungen.php' . (!empty($redirectParams) ? '?' . http_build_query($redirectParams) : ''));
+        exit;
+    }
+
+    if (isset($_POST['vergebe_buchungsnummer'])) {
+        $result = vergebeBuchungsnummer((int)$_POST['id']);
+        setFlashMessage($result['success'] ? 'success' : 'danger', $result['success'] ? 'Buchungsnummer ' . $result['buchungsnummer'] . ' vergeben.' : $result['message']);
+        $redirectParams = [];
+        if (!empty($_SESSION['rechnungen_filter'])) {
+            foreach ($_SESSION['rechnungen_filter'] as $key => $value) {
+                if ($value !== '' && $value !== null) {
+                    $redirectParams[$key] = $value;
+                }
+            }
+        }
+        header('Location: rechnungen.php' . (!empty($redirectParams) ? '?' . http_build_query($redirectParams) : ''));
+        exit;
+    }
+
     if (isset($_POST['delete'])) {
         if (deleteRechnung($_POST['id'])) {
             setFlashMessage('success', 'Rechnung gelöscht.');
@@ -138,7 +177,7 @@ $rechnungen = getRechnungen($filters);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rechnungen - Buchhaltung</title>
+    <title>Kassabuch - Buchhaltung</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
@@ -193,10 +232,10 @@ $rechnungen = getRechnungen($filters);
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label">Buchungsnr.</label>
-                                    <input type="number" class="form-control" name="buchungsnummer" 
+                                    <input type="number" class="form-control" name="buchungsnummer"
                                            value="<?= htmlspecialchars($rechnung['buchungsnummer'] ?? '') ?>"
-                                           placeholder="<?= $action === 'new' ? 'Auto' : '' ?>">
-                                    <small class="text-muted">Leer = automatisch</small>
+                                           placeholder="Noch nicht vergeben">
+                                    <small class="text-muted">Leer = wird erst später per Button in der Liste vergeben (für U30/E1a maßgeblich)</small>
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label">Rechnungsnr.</label>
@@ -432,7 +471,7 @@ $rechnungen = getRechnungen($filters);
                 <?php else: ?>
                 <!-- Liste -->
                 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-                    <h1 class="h2"><i class="bi bi-receipt me-2"></i>Rechnungen</h1>
+                    <h1 class="h2"><i class="bi bi-receipt me-2"></i>Kassabuch</h1>
                     <div class="btn-toolbar mb-2 mb-md-0">
                         <a href="rechnungen.php?action=new&typ=einnahme" class="btn btn-success me-2">
                             <i class="bi bi-plus-circle me-1"></i>Einnahme
@@ -582,7 +621,18 @@ $rechnungen = getRechnungen($filters);
                                         else $summeAusgaben += $r['brutto_betrag'];
                                     ?>
                                     <tr>
-                                        <td><strong><?= $r['buchungsnummer'] ?? '-' ?></strong></td>
+                                        <td>
+                                            <?php if ($r['buchungsnummer']): ?>
+                                            <strong><?= $r['buchungsnummer'] ?></strong>
+                                            <?php else: ?>
+                                            <form method="POST" class="d-inline">
+                                                <input type="hidden" name="id" value="<?= $r['id'] ?>">
+                                                <button type="submit" name="vergebe_buchungsnummer" class="btn btn-sm btn-outline-warning" title="Buchungsnummer vergeben - erst danach fließt die Buchung in U30/E1a ein">
+                                                    <i class="bi bi-hash"></i> Vergeben
+                                                </button>
+                                            </form>
+                                            <?php endif; ?>
+                                        </td>
                                         <td><?= formatDatum($r['datum']) ?></td>
                                         <td>
                                             <span class="badge bg-<?= $r['typ'] == 'einnahme' ? 'success' : 'danger' ?>">
@@ -611,6 +661,15 @@ $rechnungen = getRechnungen($filters);
                                             <?php endif; ?>
                                         </td>
                                         <td class="text-end">
+                                            <?php if (!$r['bezahlt'] && !empty($r['verkaufsdokument_id'])): ?>
+                                            <form method="POST" class="d-inline">
+                                                <input type="hidden" name="verkaufsdokument_id" value="<?= $r['verkaufsdokument_id'] ?>">
+                                                <button type="submit" name="bezahlt_und_buchungsnummer" class="btn btn-sm btn-outline-success"
+                                                        title="Markiert diese Verkaufsrechnung (alle zugehörigen Buchungszeilen) als heute bezahlt und vergibt zugleich die nächste freie Buchungsnummer.">
+                                                    <i class="bi bi-cash-coin"></i>
+                                                </button>
+                                            </form>
+                                            <?php endif; ?>
                                             <a href="rechnungen.php?action=edit&id=<?= $r['id'] ?>" class="btn btn-sm btn-outline-primary">
                                                 <i class="bi bi-pencil"></i>
                                             </a>

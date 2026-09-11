@@ -172,7 +172,7 @@ function getRechnungen($filters = []) {
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
             LEFT JOIN ust_saetze u ON r.ust_satz_id = u.id
             $whereClause
-            ORDER BY r.buchungsnummer DESC, r.datum DESC, r.created_at DESC";
+            ORDER BY (r.buchungsnummer IS NULL) DESC, r.buchungsnummer DESC, r.datum DESC, r.created_at DESC";
     
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -240,14 +240,11 @@ function saveRechnung($data) {
         $ustBetrag = 0; // Keine österreichische Vorsteuer!
     }
     
-    // Buchungsnummer ermitteln
+    // Buchungsnummer: wird NICHT automatisch vergeben (siehe vergebeBuchungsnummer()) - der
+    // Nutzer vergibt sie bewusst per Button, damit die Reihenfolge mit dem Bankkonto/Kassabuch
+    // übereinstimmt. Ohne Buchungsnummer fließt die Buchung auch nicht in U30/E1a ein.
     $buchungsnummer = $data['buchungsnummer'] ?? null;
-    if (empty($buchungsnummer) && empty($data['id'])) {
-        // Neue Buchung: nächste Buchungsnummer für das Jahr ermitteln
-        $jahr = date('Y', strtotime($data['datum']));
-        $buchungsnummer = getNextBuchungsnummer('rechnungen', $jahr);
-    }
-    
+
     // Benutzer-ID für Protokoll
     $benutzer_id = $_SESSION['benutzer_id'] ?? null;
     
@@ -330,6 +327,38 @@ function getNextBuchungsnummer($tabelle, $jahr) {
     $result = $stmt->fetch();
     
     return ($result['max_nr'] ?? 0) + 1;
+}
+
+/**
+ * Buchungsnummer für eine bestehende Buchung manuell vergeben (Kassabuch-Button). Buchungen
+ * ohne Buchungsnummer fließen nicht in U30/E1a ein (siehe berechneUstVoranmeldung()/
+ * berechneEinkommensteuer()) - der Nutzer entscheidet so bewusst, wann eine Buchung mit dem
+ * Bankkonto abgeglichen und "fixiert" ist.
+ */
+function vergebeBuchungsnummer($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT id, datum, buchungsnummer FROM rechnungen WHERE id = ?");
+    $stmt->execute([$id]);
+    $rechnung = $stmt->fetch();
+
+    if (!$rechnung) {
+        return ['success' => false, 'message' => 'Buchung nicht gefunden.'];
+    }
+    if (!empty($rechnung['buchungsnummer'])) {
+        return ['success' => false, 'message' => 'Buchung hat bereits eine Buchungsnummer.'];
+    }
+
+    $jahr = date('Y', strtotime($rechnung['datum']));
+    $buchungsnummer = getNextBuchungsnummer('rechnungen', $jahr);
+
+    $stmt = $db->prepare("UPDATE rechnungen SET buchungsnummer = ? WHERE id = ?");
+    $stmt->execute([$buchungsnummer, $id]);
+
+    if (function_exists('logAction')) {
+        logAction('rechnungen', $id, 'geaendert', "Buchungsnummer $buchungsnummer vergeben");
+    }
+
+    return ['success' => true, 'buchungsnummer' => $buchungsnummer];
 }
 
 /**
@@ -478,7 +507,7 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
                    SUM(r.netto_betrag) as netto, SUM(r.ust_betrag) as ust
             FROM rechnungen r
             LEFT JOIN ust_saetze u ON r.ust_satz_id = u.id
-            WHERE r.typ = 'einnahme' AND r.bezahlt = 1 AND $datumFilter
+            WHERE r.typ = 'einnahme' AND r.bezahlt = 1 AND r.buchungsnummer IS NOT NULL AND $datumFilter
             GROUP BY u.u30_kennzahl_bemessung, u.satz";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -516,6 +545,7 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
             FROM rechnungen r
             WHERE r.typ = 'ausgabe'
             AND r.bezahlt = 1
+            AND r.buchungsnummer IS NOT NULL
             AND (r.buchungsart IS NULL OR r.buchungsart IN ('inland', 'drittland'))
             AND $datumFilter";
     $stmt = $db->prepare($sql);
@@ -527,6 +557,7 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
             FROM rechnungen r
             WHERE r.typ = 'ausgabe'
             AND r.bezahlt = 1
+            AND r.buchungsnummer IS NOT NULL
             AND r.buchungsart = 'drittland'
             AND $datumFilter";
     $stmt = $db->prepare($sql);
@@ -539,6 +570,7 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
             FROM rechnungen r
             WHERE r.typ = 'ausgabe'
             AND r.bezahlt = 1
+            AND r.buchungsnummer IS NOT NULL
             AND r.buchungsart = 'eu_ige'
             AND $datumFilter";
     $stmt = $db->prepare($sql);
@@ -669,7 +701,7 @@ function berechneEinkommensteuer($jahr) {
     $sql = "SELECT k.e1a_kennzahl, COALESCE(SUM(r.netto_betrag), 0) as summe
             FROM rechnungen r
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
-            WHERE r.typ = 'einnahme' AND r.bezahlt = 1 AND YEAR(r.bezahlt_am) = ?
+            WHERE r.typ = 'einnahme' AND r.bezahlt = 1 AND r.buchungsnummer IS NOT NULL AND YEAR(r.bezahlt_am) = ?
             GROUP BY k.e1a_kennzahl";
     $stmt = $db->prepare($sql);
     $stmt->execute([$jahr]);
@@ -690,7 +722,7 @@ function berechneEinkommensteuer($jahr) {
     $sql = "SELECT k.e1a_kennzahl, r.buchungsart, r.netto_betrag, r.ausland_ust_betrag
             FROM rechnungen r
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
-            WHERE r.typ = 'ausgabe' AND r.bezahlt = 1 AND YEAR(r.bezahlt_am) = ?";
+            WHERE r.typ = 'ausgabe' AND r.bezahlt = 1 AND r.buchungsnummer IS NOT NULL AND YEAR(r.bezahlt_am) = ?";
     $stmt = $db->prepare($sql);
     $stmt->execute([$jahr]);
     foreach ($stmt->fetchAll() as $row) {

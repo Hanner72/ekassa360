@@ -12,7 +12,7 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
             </li>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage == 'rechnungen' ? 'active' : '' ?>" href="rechnungen.php">
-                    <i class="bi bi-receipt me-2"></i>Rechnungen
+                    <i class="bi bi-receipt me-2"></i>Kassabuch
                 </a>
             </li>
         </ul>

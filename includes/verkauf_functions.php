@@ -766,3 +766,33 @@ function markVerkaufsrechnungBezahlt($verkaufsdokumentId, $bezahlt, $bezahlt_am,
 
     return ['success' => true];
 }
+
+/**
+ * Kassabuch-Kurzaktion: Verkaufsrechnung als heute bezahlt markieren UND zugleich allen
+ * noch unnummerierten Ledger-Zeilen dieses Dokuments eine Buchungsnummer vergeben (siehe
+ * vergebeBuchungsnummer() in functions.php) - beide Schritte passieren beim Bankabgleich im
+ * Kassabuch typischerweise im selben Moment. Eine Verkaufsrechnung mit gemischten USt-Sätzen
+ * hat mehrere Ledger-Zeilen (eine pro USt-Satz) und bekommt entsprechend mehrere, fortlaufende
+ * Buchungsnummern.
+ */
+function markVerkaufsrechnungBezahltUndVergebeBuchungsnummer($verkaufsdokumentId, $bezahlt_am, $zahlungsart) {
+    $ergebnis = markVerkaufsrechnungBezahlt($verkaufsdokumentId, true, $bezahlt_am, $zahlungsart);
+    if (!$ergebnis['success']) {
+        return $ergebnis;
+    }
+
+    $db = db();
+    $stmt = $db->prepare("SELECT id FROM rechnungen WHERE verkaufsdokument_id = ? AND buchungsnummer IS NULL");
+    $stmt->execute([$verkaufsdokumentId]);
+    $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    $buchungsnummern = [];
+    foreach ($ids as $id) {
+        $vergabe = vergebeBuchungsnummer($id);
+        if ($vergabe['success']) {
+            $buchungsnummern[] = $vergabe['buchungsnummer'];
+        }
+    }
+
+    return ['success' => true, 'buchungsnummern' => $buchungsnummern];
+}

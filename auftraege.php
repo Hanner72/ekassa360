@@ -102,7 +102,9 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         $result = sendeVerkaufsdokumentEmail(
             (int)$_POST['id'],
             trim($_POST['empfaenger_email'] ?? '') ?: null,
-            trim($_POST['nachricht'] ?? '') ?: null
+            trim($_POST['betreff'] ?? '') ?: null,
+            trim($_POST['nachricht'] ?? '') ?: null,
+            $_POST['signatur'] ?? null
         );
         setFlashMessage($result['success'] ? 'success' : 'danger', $result['success'] ? 'Auftrag per E-Mail an ' . $result['empfaenger'] . ' versendet.' : $result['error']);
         header('Location: auftraege.php');
@@ -113,6 +115,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $kunden = getAlleKunden(true);
 $artikelListe = getAlleArtikel(true);
 $ustSaetze = getUstSaetze();
+$emailSignaturen = getAlleEmailSignaturen();
 
 $dokument = null;
 $positionen = [];
@@ -259,7 +262,7 @@ $pageTitle = 'Aufträge';
                             <i class="bi bi-file-pdf me-1"></i>PDF
                         </a>
                         <button type="button" class="btn btn-outline-<?= !empty($dokument['versendet_am']) ? 'success' : 'secondary' ?>" data-bs-toggle="modal" data-bs-target="#versandModal"
-                                onclick="oeffneVersandModal(<?= $dokument['id'] ?>, <?= htmlspecialchars(json_encode($dokument['email'] ?? ''), ENT_QUOTES) ?>)"
+                                onclick="oeffneVersandModal(<?= versandModalOnclickArgs($dokument) ?>)"
                                 title="<?= htmlspecialchars(versandButtonTitle($dokument)) ?>">
                             <i class="bi bi-envelope<?= !empty($dokument['versendet_am']) ? '-check' : '' ?> me-1"></i>Versenden
                         </button>
@@ -343,7 +346,7 @@ $pageTitle = 'Aufträge';
                                             <a href="auftraege.php?action=view&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="bi bi-eye"></i></a>
                                             <a href="pdf_verkaufsdokument.php?id=<?= $d['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary"><i class="bi bi-file-pdf"></i></a>
                                             <button type="button" class="btn btn-sm btn-outline-<?= !empty($d['versendet_am']) ? 'success' : 'secondary' ?>" data-bs-toggle="modal" data-bs-target="#versandModal"
-                                                    onclick="oeffneVersandModal(<?= $d['id'] ?>, <?= htmlspecialchars(json_encode($d['email'] ?? ''), ENT_QUOTES) ?>)" title="<?= htmlspecialchars(versandButtonTitle($d)) ?>">
+                                                    onclick="oeffneVersandModal(<?= versandModalOnclickArgs($d) ?>)" title="<?= htmlspecialchars(versandButtonTitle($d)) ?>">
                                                 <i class="bi bi-envelope<?= !empty($d['versendet_am']) ? '-check' : '' ?>"></i>
                                             </button>
                                             <?php endif; ?>
@@ -376,7 +379,7 @@ $pageTitle = 'Aufträge';
 
     <!-- Versand Modal -->
     <div class="modal fade" id="versandModal" tabindex="-1">
-        <div class="modal-dialog">
+        <div class="modal-dialog modal-lg">
             <div class="modal-content">
                 <form method="POST">
                     <input type="hidden" name="action" value="versenden">
@@ -394,8 +397,30 @@ $pageTitle = 'Aufträge';
                             <input type="email" class="form-control" name="empfaenger_email" id="v_email" required>
                         </div>
                         <div class="mb-3">
-                            <label class="form-label">Zusätzliche Nachricht (optional)</label>
-                            <textarea class="form-control" name="nachricht" rows="3" placeholder="Wird der Standard-Nachricht vorangestellt"></textarea>
+                            <label class="form-label">Betreff</label>
+                            <input type="text" class="form-control" name="betreff" id="v_betreff" required>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Nachricht</label>
+                            <textarea class="form-control" name="nachricht" id="v_nachricht" rows="6"></textarea>
+                        </div>
+                        <div class="row mb-3">
+                            <div class="col-md-5">
+                                <label class="form-label">Signatur</label>
+                                <select class="form-select" id="v_signatur_id" onchange="signaturWechseln()">
+                                    <option value="">-- Keine --</option>
+                                    <?php foreach ($emailSignaturen as $sig): ?>
+                                    <option value="<?= $sig['id'] ?>"><?= htmlspecialchars($sig['name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                            </div>
+                            <div class="col-md-7">
+                                <label class="form-label">Signatur-Text</label>
+                                <textarea class="form-control" name="signatur" id="v_signatur" rows="3"></textarea>
+                            </div>
+                        </div>
+                        <div class="form-text">
+                            <a href="einstellungen.php?tab=email_vorlagen" target="_blank">Vorlagen &amp; Signaturen verwalten</a>
                         </div>
                     </div>
                     <div class="modal-footer">
@@ -409,9 +434,20 @@ $pageTitle = 'Aufträge';
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
-        function oeffneVersandModal(id, email) {
+        const emailSignaturenMap = <?= json_encode(array_column($emailSignaturen, 'inhalt', 'id')) ?>;
+
+        function signaturWechseln() {
+            const sigId = document.getElementById('v_signatur_id').value;
+            document.getElementById('v_signatur').value = sigId ? (emailSignaturenMap[sigId] || '') : '';
+        }
+
+        function oeffneVersandModal(id, email, betreff, nachricht, signaturId, signaturText) {
             document.getElementById('v_id').value = id;
             document.getElementById('v_email').value = email || '';
+            document.getElementById('v_betreff').value = betreff || '';
+            document.getElementById('v_nachricht').value = nachricht || '';
+            document.getElementById('v_signatur_id').value = signaturId || '';
+            document.getElementById('v_signatur').value = signaturText || '';
         }
 
         const artikelDaten = <?= json_encode($artikelListe) ?>;

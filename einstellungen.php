@@ -9,6 +9,7 @@ require_once 'includes/functions.php';
 require_once 'includes/auth.php';
 require_once 'includes/verkauf_functions.php';
 require_once 'includes/verkauf_pdf.php';
+require_once 'includes/mail.php';
 
 requireLogin();
 
@@ -196,7 +197,47 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: einstellungen.php?tab=pdf_design&typ=' . urlencode($pdfTyp));
         exit;
     }
-    
+
+    // E-Mail-Vorlage speichern (Angebot/Auftrag/Rechnung)
+    if (isset($_POST['save_email_vorlage'])) {
+        $emailTyp = $_POST['typ'] ?? 'rechnung';
+        saveEmailVorlage($emailTyp, trim($_POST['betreff'] ?? ''), $_POST['nachricht'] ?? '', $_POST['standard_signatur_id'] ?? null);
+        setFlashMessage('success', 'E-Mail-Vorlage gespeichert.');
+        header('Location: einstellungen.php?tab=email_vorlagen&typ=' . urlencode($emailTyp));
+        exit;
+    }
+
+    // E-Mail-Vorlage auf Standard zurücksetzen
+    if (isset($_POST['reset_email_vorlage'])) {
+        $emailTyp = $_POST['typ'] ?? 'rechnung';
+        $standard = standardEmailVorlage($emailTyp);
+        saveEmailVorlage($emailTyp, $standard['betreff'], $standard['nachricht'], null);
+        setFlashMessage('success', 'E-Mail-Vorlage auf Standard zurückgesetzt.');
+        header('Location: einstellungen.php?tab=email_vorlagen&typ=' . urlencode($emailTyp));
+        exit;
+    }
+
+    // Signatur speichern (neu oder bearbeiten)
+    if (isset($_POST['save_email_signatur'])) {
+        saveEmailSignatur([
+            'id' => $_POST['signatur_id'] ?: null,
+            'name' => $_POST['signatur_name'] ?? '',
+            'inhalt' => $_POST['signatur_inhalt'] ?? '',
+            'ist_standard' => isset($_POST['signatur_ist_standard']) ? 1 : 0,
+        ]);
+        setFlashMessage('success', 'Signatur gespeichert.');
+        header('Location: einstellungen.php?tab=email_vorlagen&typ=' . urlencode($_POST['typ'] ?? 'rechnung'));
+        exit;
+    }
+
+    // Signatur löschen
+    if (isset($_POST['delete_email_signatur'])) {
+        deleteEmailSignatur((int)$_POST['signatur_id']);
+        setFlashMessage('success', 'Signatur gelöscht.');
+        header('Location: einstellungen.php?tab=email_vorlagen&typ=' . urlencode($_POST['typ'] ?? 'rechnung'));
+        exit;
+    }
+
     // Beispieldaten erstellen
     if (isset($_POST['create_beispieldaten'])) {
         // Kategorien und USt-Sätze laden
@@ -387,6 +428,13 @@ if (!array_key_exists($pdfDesignTyp, $pdfDesignTypen)) {
 }
 $pdfVorlageInhalt = $tab === 'pdf_design' ? getPdfVorlage($pdfDesignTyp) : '';
 
+$emailDesignTyp = $_GET['typ'] ?? 'rechnung';
+if (!array_key_exists($emailDesignTyp, $nummernkreisLabels)) {
+    $emailDesignTyp = 'rechnung';
+}
+$emailVorlageAktuell = $tab === 'email_vorlagen' ? getEmailVorlage($emailDesignTyp) : null;
+$emailSignaturenListe = $tab === 'email_vorlagen' ? getAlleEmailSignaturen() : [];
+
 // E1a Kennzahlen
 $e1aKennzahlen = [
     'Einnahmen' => ['9040' => 'Erlöse Waren', '9050' => 'Erlöse Dienstleistungen', '9060' => 'Anlagenerträge', '9090' => 'Übrige Erträge'],
@@ -441,6 +489,11 @@ $e1aKennzahlen = [
                     <li class="nav-item">
                         <a class="nav-link <?= $tab === 'pdf_design' ? 'active' : '' ?>" href="?tab=pdf_design&typ=<?= $pdfDesignTyp ?>">
                             <i class="bi bi-file-earmark-pdf me-1"></i>PDF-Design
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $tab === 'email_vorlagen' ? 'active' : '' ?>" href="?tab=email_vorlagen&typ=<?= $emailDesignTyp ?>">
+                            <i class="bi bi-envelope-paper me-1"></i>E-Mail-Vorlagen
                         </a>
                     </li>
                     <li class="nav-item">
@@ -941,6 +994,156 @@ $e1aKennzahlen = [
                     document.getElementById('previewForm').addEventListener('submit', function() {
                         document.getElementById('preview_vorlage_hidden').value = document.getElementById('vorlage_text').value;
                     });
+                </script>
+
+                <?php elseif ($tab === 'email_vorlagen'): ?>
+                <!-- E-MAIL-VORLAGEN (Betreff/Text pro Dokumenttyp) + Signaturen -->
+                <ul class="nav nav-pills mb-3">
+                    <?php foreach ($nummernkreisLabels as $val => $label): ?>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $emailDesignTyp === $val ? 'active' : '' ?>" href="?tab=email_vorlagen&typ=<?= $val ?>"><?= $label ?></a>
+                    </li>
+                    <?php endforeach; ?>
+                </ul>
+
+                <div class="row">
+                    <div class="col-lg-7">
+                        <form method="POST">
+                            <input type="hidden" name="typ" value="<?= $emailDesignTyp ?>">
+                            <div class="mb-3">
+                                <label class="form-label">Betreff</label>
+                                <input type="text" class="form-control" name="betreff" value="<?= htmlspecialchars($emailVorlageAktuell['betreff']) ?>">
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Nachricht</label>
+                                <textarea class="form-control" name="nachricht" rows="10"><?= htmlspecialchars($emailVorlageAktuell['nachricht']) ?></textarea>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Standard-Signatur für diesen Dokumenttyp</label>
+                                <select class="form-select" name="standard_signatur_id">
+                                    <option value="">-- Global-Standard verwenden --</option>
+                                    <?php foreach ($emailSignaturenListe as $sig): ?>
+                                    <option value="<?= $sig['id'] ?>" <?= ($emailVorlageAktuell['standard_signatur_id'] ?? '') == $sig['id'] ? 'selected' : '' ?>><?= htmlspecialchars($sig['name']) ?></option>
+                                    <?php endforeach; ?>
+                                </select>
+                                <div class="form-text">Beim Versand kann die Signatur pro E-Mail trotzdem noch geändert werden.</div>
+                            </div>
+                            <button type="submit" name="save_email_vorlage" class="btn btn-success btn-sm">
+                                <i class="bi bi-check-lg me-1"></i>Speichern
+                            </button>
+                        </form>
+                        <form method="POST" class="mt-2" onsubmit="return confirm('Vorlage wirklich auf den Standard zurücksetzen? Eigene Änderungen gehen verloren.')">
+                            <input type="hidden" name="typ" value="<?= $emailDesignTyp ?>">
+                            <button type="submit" name="reset_email_vorlage" class="btn btn-outline-danger btn-sm">
+                                <i class="bi bi-arrow-counterclockwise me-1"></i>Auf Standard zurücksetzen
+                            </button>
+                        </form>
+                    </div>
+
+                    <div class="col-lg-5">
+                        <div class="card mb-3">
+                            <div class="card-header"><i class="bi bi-code-slash me-2"></i>Platzhalter</div>
+                            <div class="card-body">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <tr><td><code>{{typ_label}}</code></td><td class="small">"Angebot" / "Auftragsbestätigung" / "Rechnung"</td></tr>
+                                        <tr><td><code>{{nummer}}</code></td><td class="small">Dokumentnummer</td></tr>
+                                        <tr><td><code>{{datum}}</code>, <code>{{faellig_am}}</code>, <code>{{gueltig_bis}}</code></td><td class="small">Formatierte Daten</td></tr>
+                                        <tr><td><code>{{betreff}}</code></td><td class="small">Betreff-Feld des Dokuments</td></tr>
+                                        <tr><td><code>{{firma_name}}</code></td><td class="small">Firmenname</td></tr>
+                                        <tr><td><code>{{kunde_name}}</code></td><td class="small">Anzeigename des Kunden</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <span><i class="bi bi-pen me-2"></i>Signaturen</span>
+                                <button type="button" class="btn btn-sm btn-primary" data-bs-toggle="modal" data-bs-target="#signaturModal" onclick="neueSignatur()">
+                                    <i class="bi bi-plus-lg"></i>
+                                </button>
+                            </div>
+                            <div class="card-body p-0">
+                                <table class="table table-sm mb-0">
+                                    <tbody>
+                                        <?php if (empty($emailSignaturenListe)): ?>
+                                        <tr><td class="text-center text-muted py-3">Keine Signaturen angelegt</td></tr>
+                                        <?php else: foreach ($emailSignaturenListe as $sig): ?>
+                                        <tr>
+                                            <td>
+                                                <?= htmlspecialchars($sig['name']) ?>
+                                                <?php if ($sig['ist_standard']): ?><span class="badge bg-secondary">Standard</span><?php endif; ?>
+                                            </td>
+                                            <td class="text-end text-nowrap">
+                                                <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#signaturModal"
+                                                        onclick='bearbeiteSignatur(<?= json_encode($sig, JSON_HEX_APOS | JSON_HEX_QUOT) ?>)'>
+                                                    <i class="bi bi-pencil"></i>
+                                                </button>
+                                                <form method="POST" class="d-inline" onsubmit="return confirm('Signatur wirklich löschen?');">
+                                                    <input type="hidden" name="signatur_id" value="<?= $sig['id'] ?>">
+                                                    <input type="hidden" name="typ" value="<?= $emailDesignTyp ?>">
+                                                    <button type="submit" name="delete_email_signatur" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                                </form>
+                                            </td>
+                                        </tr>
+                                        <?php endforeach; endif; ?>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Signatur Modal -->
+                <div class="modal fade" id="signaturModal" tabindex="-1">
+                    <div class="modal-dialog">
+                        <div class="modal-content">
+                            <form method="POST">
+                                <input type="hidden" name="signatur_id" id="sig_id" value="">
+                                <input type="hidden" name="typ" value="<?= $emailDesignTyp ?>">
+                                <div class="modal-header">
+                                    <h5 class="modal-title" id="sig_modalTitle"><i class="bi bi-pen me-2"></i>Neue Signatur</h5>
+                                    <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                                </div>
+                                <div class="modal-body">
+                                    <div class="mb-3">
+                                        <label class="form-label">Name</label>
+                                        <input type="text" class="form-control" name="signatur_name" id="sig_name" required placeholder="z.B. Standard, Verkauf, Buchhaltung">
+                                    </div>
+                                    <div class="mb-3">
+                                        <label class="form-label">Inhalt</label>
+                                        <textarea class="form-control" name="signatur_inhalt" id="sig_inhalt" rows="4"></textarea>
+                                        <div class="form-text">Platzhalter wie <code>{{firma_name}}</code> werden beim Versand ersetzt.</div>
+                                    </div>
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" name="signatur_ist_standard" id="sig_ist_standard">
+                                        <label class="form-check-label" for="sig_ist_standard">Als globalen Standard verwenden</label>
+                                    </div>
+                                </div>
+                                <div class="modal-footer">
+                                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                                    <button type="submit" name="save_email_signatur" class="btn btn-primary">Speichern</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                <script>
+                    function neueSignatur() {
+                        document.getElementById('sig_modalTitle').innerHTML = '<i class="bi bi-pen me-2"></i>Neue Signatur';
+                        document.getElementById('sig_id').value = '';
+                        document.getElementById('sig_name').value = '';
+                        document.getElementById('sig_inhalt').value = '';
+                        document.getElementById('sig_ist_standard').checked = false;
+                    }
+                    function bearbeiteSignatur(sig) {
+                        document.getElementById('sig_modalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Signatur bearbeiten';
+                        document.getElementById('sig_id').value = sig.id;
+                        document.getElementById('sig_name').value = sig.name || '';
+                        document.getElementById('sig_inhalt').value = sig.inhalt || '';
+                        document.getElementById('sig_ist_standard').checked = sig.ist_standard == 1;
+                    }
                 </script>
 
                 <?php elseif ($tab === 'hilfe'): ?>
