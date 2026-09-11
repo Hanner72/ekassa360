@@ -56,9 +56,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: kunden.php');
         exit;
     }
+
+    if ($action === 'delete') {
+        $result = deleteKunde((int)$_POST['id']);
+        setFlashMessage($result['success'] ? 'success' : 'danger', $result['success'] ? 'Kunde gelöscht.' : $result['message']);
+        header('Location: kunden.php');
+        exit;
+    }
 }
 
 $kunden = getAlleKunden(false);
+$kundenMitDokumenten = array_flip(getKundenIdsMitVerkaufsdokumenten());
 $pageTitle = 'Kunden';
 ?>
 <!DOCTYPE html>
@@ -142,6 +150,20 @@ $pageTitle = 'Kunden';
                                                     <i class="bi bi-<?= $k['aktiv'] ? 'eye-slash' : 'eye' ?>"></i>
                                                 </button>
                                             </form>
+                                            <?php if (isset($kundenMitDokumenten[$k['id']])): ?>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled
+                                                    title="Kann nicht gelöscht werden - es bestehen bereits Angebote, Aufträge oder Rechnungen zu diesem Kunden. Stattdessen deaktivieren.">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                            <?php else: ?>
+                                            <form method="POST" class="d-inline" onsubmit="return confirm('Kunde wirklich endgültig löschen?');">
+                                                <input type="hidden" name="action" value="delete">
+                                                <input type="hidden" name="id" value="<?= $k['id'] ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-danger" title="Kunde löschen">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </form>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                     <?php endforeach; endif; ?>

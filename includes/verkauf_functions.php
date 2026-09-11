@@ -117,6 +117,36 @@ function toggleKundeAktiv($id) {
     return $stmt->execute([$id]);
 }
 
+/**
+ * IDs aller Kunden, zu denen bereits mindestens ein Angebot/Auftrag/Rechnung existiert -
+ * für die Liste (Löschen-Button ausblenden) und als Sperre in deleteKunde().
+ */
+function getKundenIdsMitVerkaufsdokumenten() {
+    $db = db();
+    return $db->query("SELECT DISTINCT kunde_id FROM verkaufsdokumente WHERE kunde_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+}
+
+/**
+ * Kunde löschen - nur erlaubt, wenn noch keine Angebote/Aufträge/Rechnungen zu diesem
+ * Kunden bestehen (die Fremdschlüssel dort sind ON DELETE SET NULL, würden also beim
+ * Löschen sonst stillschweigend von echten Belegen abgekoppelt).
+ */
+function deleteKunde($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM verkaufsdokumente WHERE kunde_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Kunde kann nicht gelöscht werden - es bestehen bereits Angebote, Aufträge oder Rechnungen zu diesem Kunden. Bitte stattdessen deaktivieren.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM kunden WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('kunden', $id, 'geloescht', 'Kunde gelöscht');
+    }
+    return ['success' => $result];
+}
+
 // ============================================
 // ARTIKEL
 // ============================================
