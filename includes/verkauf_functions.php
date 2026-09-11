@@ -80,17 +80,31 @@ function saveKunde($data) {
     }
 
     $benutzer_id = $_SESSION['benutzer_id'] ?? null;
-    $stmt = $db->prepare("INSERT INTO kunden
-        (kundennummer, firma_name, anrede, vorname, nachname, strasse, plz, ort, land, uid_nummer, email, telefon, notizen, aktiv, erstellt_von)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->execute([
-        $kundennummer ?: null, $firmaName ?: null, $anrede ?: null,
-        $vorname ?: null, $nachname ?: null, $strasse ?: null,
-        $plz ?: null, $ort ?: null, $land,
-        $uidNummer ?: null, $email ?: null, $telefon ?: null,
-        $notizen ?: null, $aktiv, $benutzer_id
-    ]);
-    $id = $db->lastInsertId();
+
+    // Neuer Kunde ohne manuell angegebene Kundennummer: automatisch aus dem Nummernkreis
+    // ziehen (siehe zieheKundennummer() - jahresunabhängig, anders als Angebot/Auftrag/Rechnung).
+    $db->beginTransaction();
+    try {
+        if (empty($kundennummer)) {
+            $kundennummer = zieheKundennummer();
+        }
+        $stmt = $db->prepare("INSERT INTO kunden
+            (kundennummer, firma_name, anrede, vorname, nachname, strasse, plz, ort, land, uid_nummer, email, telefon, notizen, aktiv, erstellt_von)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $kundennummer, $firmaName ?: null, $anrede ?: null,
+            $vorname ?: null, $nachname ?: null, $strasse ?: null,
+            $plz ?: null, $ort ?: null, $land,
+            $uidNummer ?: null, $email ?: null, $telefon ?: null,
+            $notizen ?: null, $aktiv, $benutzer_id
+        ]);
+        $id = $db->lastInsertId();
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        throw $e;
+    }
+
     if ($id && function_exists('logAction')) {
         logAction('kunden', $id, 'erstellt', 'Kunde erstellt: ' . kundenAnzeigename($data));
     }
@@ -482,6 +496,7 @@ function zieheNummernkreisNummer($schluessel, $jahr, $datum) {
         'rechnung' => 'RE-{JJJJ}-{NNNN}',
         'angebot' => 'AN-{JJJJ}-{NNNN}',
         'auftrag' => 'AU-{JJJJ}-{NNNN}',
+        'kunde' => 'K-{NNNN}',
     ];
 
     $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE schluessel = ? AND jahr = ? FOR UPDATE");
@@ -498,6 +513,16 @@ function zieheNummernkreisNummer($schluessel, $jahr, $datum) {
     $nummer = formatiereNummernkreisNummer($kreis['format'], $datum, $kreis['naechste_nummer']);
     $db->prepare("UPDATE nummernkreise SET naechste_nummer = naechste_nummer + 1 WHERE id = ?")->execute([$kreis['id']]);
     return $nummer;
+}
+
+/**
+ * Kundennummer aus dem Nummernkreis ziehen. Anders als Angebot/Auftrag/Rechnung ist die
+ * Kundennummer NICHT jahresgebunden (ein Kunde bleibt über Jahre hinweg derselbe) - deshalb
+ * fester Jahr-Sentinel 0 statt des aktuellen Kalenderjahres. Das Belegdatum (für etwaige
+ * {JJJJ}/{MM}/{TT}-Platzhalter im Format) ist trotzdem das heutige Datum.
+ */
+function zieheKundennummer() {
+    return zieheNummernkreisNummer('kunde', 0, date('Y-m-d'));
 }
 
 /**

@@ -420,6 +420,10 @@ if ($tab === 'nummernkreise') {
     }
 }
 $nummernkreisLabels = ['rechnung' => 'Rechnung', 'angebot' => 'Angebot', 'auftrag' => 'Auftrag'];
+// Nur für die Nummernkreise-Verwaltung: zusätzlich "Kunde" (jahresunabhängig, siehe
+// zieheKundennummer()) - bewusst getrennt von $nummernkreisLabels, da dieses auch die
+// PDF-Design- und E-Mail-Vorlagen-Tabs steuert, für die es keinen "Kunde"-Typ gibt.
+$nummernkreisSchluesselLabels = $nummernkreisLabels + ['kunde' => 'Kunde'];
 $pdfDesignTypen = $nummernkreisLabels + ['lieferschein' => 'Lieferschein'];
 
 $pdfDesignTyp = $_GET['typ'] ?? 'rechnung';
@@ -820,10 +824,10 @@ $e1aKennzahlen = [
                                 <div class="col-md-4">
                                     <label class="form-label">Dokumenttyp *</label>
                                     <?php if ($action === 'edit'): ?>
-                                    <input type="text" class="form-control" value="<?= $nummernkreisLabels[$nummernkreis['schluessel']] ?? $nummernkreis['schluessel'] ?>" disabled>
+                                    <input type="text" class="form-control" value="<?= $nummernkreisSchluesselLabels[$nummernkreis['schluessel']] ?? $nummernkreis['schluessel'] ?>" disabled>
                                     <?php else: ?>
-                                    <select class="form-select" name="schluessel" required>
-                                        <?php foreach ($nummernkreisLabels as $val => $label): ?>
+                                    <select class="form-select" name="schluessel" id="nk_schluessel" required>
+                                        <?php foreach ($nummernkreisSchluesselLabels as $val => $label): ?>
                                         <option value="<?= $val ?>"><?= $label ?></option>
                                         <?php endforeach; ?>
                                     </select>
@@ -832,9 +836,10 @@ $e1aKennzahlen = [
                                 <div class="col-md-4">
                                     <label class="form-label">Jahr *</label>
                                     <?php if ($action === 'edit'): ?>
-                                    <input type="text" class="form-control" value="<?= $nummernkreis['jahr'] ?>" disabled>
+                                    <input type="text" class="form-control" value="<?= $nummernkreis['schluessel'] === 'kunde' ? 'Kein Jahresbezug' : $nummernkreis['jahr'] ?>" disabled>
                                     <?php else: ?>
-                                    <input type="number" class="form-control" name="jahr" value="<?= date('Y') ?>" required>
+                                    <input type="number" class="form-control" name="jahr" id="nk_jahr" value="<?= date('Y') ?>" required>
+                                    <div class="form-text" id="nk_jahr_hinweis" style="display:none;">Kundennummern sind nicht jahresgebunden - Jahr wird ignoriert (auf 0 gesetzt).</div>
                                     <?php endif; ?>
                                 </div>
                                 <div class="col-md-4">
@@ -886,6 +891,32 @@ $e1aKennzahlen = [
                     document.getElementById('nk_format').addEventListener('input', nkAktualisiereVorschau);
                     document.getElementById('nk_naechste_nummer').addEventListener('input', nkAktualisiereVorschau);
                     nkAktualisiereVorschau();
+
+                    // "Kunde" ist jahresunabhängig (siehe zieheKundennummer()) - Jahr-Feld beim
+                    // Anlegen auf 0 fixieren und Standard-Format vorschlagen.
+                    const nkStandardFormate = { rechnung: 'RE-{JJJJ}-{NNNN}', angebot: 'AN-{JJJJ}-{NNNN}', auftrag: 'AU-{JJJJ}-{NNNN}', kunde: 'K-{NNNN}' };
+                    const nkSchluesselSelect = document.getElementById('nk_schluessel');
+                    const nkJahrFeld = document.getElementById('nk_jahr');
+                    const nkJahrHinweis = document.getElementById('nk_jahr_hinweis');
+                    const nkFormatFeld = document.getElementById('nk_format');
+                    function nkSchluesselGeaendert() {
+                        if (!nkSchluesselSelect || !nkJahrFeld) return;
+                        const istKunde = nkSchluesselSelect.value === 'kunde';
+                        if (Object.values(nkStandardFormate).includes(nkFormatFeld.value)) {
+                            nkFormatFeld.value = nkStandardFormate[nkSchluesselSelect.value] || nkFormatFeld.value;
+                        }
+                        if (istKunde) {
+                            nkJahrFeld.dataset.vorherigerWert = nkJahrFeld.dataset.vorherigerWert || nkJahrFeld.value;
+                            nkJahrFeld.value = '0';
+                            nkJahrFeld.readOnly = true;
+                        } else {
+                            nkJahrFeld.readOnly = false;
+                            if (nkJahrFeld.dataset.vorherigerWert) nkJahrFeld.value = nkJahrFeld.dataset.vorherigerWert;
+                        }
+                        if (nkJahrHinweis) nkJahrHinweis.style.display = istKunde ? '' : 'none';
+                        nkAktualisiereVorschau();
+                    }
+                    nkSchluesselSelect?.addEventListener('change', nkSchluesselGeaendert);
                 </script>
                 <?php else: ?>
                 <div class="card">
@@ -900,8 +931,8 @@ $e1aKennzahlen = [
                         <tr><td colspan="6" class="text-center text-muted py-4">Noch keine Nummernkreise vorhanden</td></tr>
                         <?php else: foreach ($nummernkreise as $nk): ?>
                         <tr>
-                            <td><?= $nummernkreisLabels[$nk['schluessel']] ?? htmlspecialchars($nk['schluessel']) ?></td>
-                            <td class="text-center"><?= $nk['jahr'] ?></td>
+                            <td><?= $nummernkreisSchluesselLabels[$nk['schluessel']] ?? htmlspecialchars($nk['schluessel']) ?></td>
+                            <td class="text-center"><?= $nk['schluessel'] === 'kunde' ? '<span class="text-muted">kein Jahresbezug</span>' : $nk['jahr'] ?></td>
                             <td><code><?= htmlspecialchars($nk['format']) ?></code></td>
                             <td class="text-center"><span class="badge bg-primary"><?= $nk['naechste_nummer'] ?></span></td>
                             <td><code><?= htmlspecialchars(formatiereNummernkreisNummer($nk['format'], date('Y-m-d'), $nk['naechste_nummer'])) ?></code></td>

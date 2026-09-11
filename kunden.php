@@ -88,18 +88,27 @@ $pageTitle = 'Kunden';
 
                 <?php displayFlashMessage(); ?>
 
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control" id="kundenSuche" placeholder="Suche nach Kundennummer, Name, Ort, UID, E-Mail...">
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-hover mb-0">
+                            <table class="table table-hover mb-0" id="kundenTabelle">
                                 <thead class="table-light">
                                     <tr>
-                                        <th>Kd.-Nr.</th>
-                                        <th>Name</th>
-                                        <th>Ort</th>
-                                        <th>UID</th>
-                                        <th>E-Mail</th>
-                                        <th>Status</th>
+                                        <th class="sortierbar" data-spalte="0">Kd.-Nr. <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th class="sortierbar" data-spalte="1">Name <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th class="sortierbar" data-spalte="2">Ort <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th class="sortierbar" data-spalte="3">UID <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th class="sortierbar" data-spalte="4">E-Mail <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th class="sortierbar" data-spalte="5">Status <i class="bi bi-arrow-down-up small text-muted"></i></th>
                                         <th class="text-end">Aktionen</th>
                                     </tr>
                                 </thead>
@@ -113,7 +122,7 @@ $pageTitle = 'Kunden';
                                         <td><?= htmlspecialchars($k['ort'] ?: '-') ?></td>
                                         <td><?= htmlspecialchars($k['uid_nummer'] ?: '-') ?></td>
                                         <td><?= htmlspecialchars($k['email'] ?: '-') ?></td>
-                                        <td>
+                                        <td data-sortwert="<?= $k['aktiv'] ? 1 : 0 ?>">
                                             <?php if ($k['aktiv']): ?>
                                                 <span class="badge bg-success">Aktiv</span>
                                             <?php else: ?>
@@ -160,7 +169,8 @@ $pageTitle = 'Kunden';
                         <div class="row mb-3">
                             <div class="col-md-4">
                                 <label class="form-label">Kundennummer</label>
-                                <input type="text" class="form-control" name="kundennummer" id="k_kundennummer">
+                                <input type="text" class="form-control" name="kundennummer" id="k_kundennummer" placeholder="Automatisch">
+                                <div class="form-text">Leer = wird automatisch aus dem Nummernkreis vergeben</div>
                             </div>
                             <div class="col-md-8">
                                 <label class="form-label">Firmenname</label>
@@ -263,6 +273,49 @@ $pageTitle = 'Kunden';
                 document.getElementById('k_id').value = '';
                 document.getElementById('k_land').value = 'Österreich';
             }
+        });
+
+        // Suche: filtert Zeilen client-seitig über alle sichtbaren Spalten
+        const kundenSucheFeld = document.getElementById('kundenSuche');
+        const kundenTbody = document.querySelector('#kundenTabelle tbody');
+        kundenSucheFeld?.addEventListener('input', function() {
+            const suchbegriff = this.value.trim().toLowerCase();
+            kundenTbody.querySelectorAll('tr').forEach(function(zeile) {
+                if (!zeile.cells || zeile.cells.length < 6) return; // "Keine Kunden vorhanden"-Zeile überspringen
+                const text = zeile.textContent.toLowerCase();
+                zeile.classList.toggle('d-none', suchbegriff !== '' && !text.includes(suchbegriff));
+            });
+        });
+
+        // Sortierung: Klick auf Spaltenkopf sortiert die Tabellenzeilen auf-/absteigend
+        let kundenSortSpalte = null;
+        let kundenSortAufsteigend = true;
+        document.querySelectorAll('#kundenTabelle th.sortierbar').forEach(function(th) {
+            th.style.cursor = 'pointer';
+            th.addEventListener('click', function() {
+                const spalte = parseInt(th.dataset.spalte, 10);
+                kundenSortAufsteigend = (kundenSortSpalte === spalte) ? !kundenSortAufsteigend : true;
+                kundenSortSpalte = spalte;
+
+                const zeilen = Array.from(kundenTbody.querySelectorAll('tr')).filter(z => z.cells && z.cells.length >= 6);
+                zeilen.sort(function(a, b) {
+                    const zelleA = a.cells[spalte];
+                    const zelleB = b.cells[spalte];
+                    const wertA = zelleA.dataset.sortwert ?? zelleA.textContent.trim().toLowerCase();
+                    const wertB = zelleB.dataset.sortwert ?? zelleB.textContent.trim().toLowerCase();
+                    let vergleich;
+                    if (zelleA.dataset.sortwert !== undefined) {
+                        vergleich = parseFloat(wertA) - parseFloat(wertB);
+                    } else {
+                        vergleich = wertA.localeCompare(wertB, 'de');
+                    }
+                    return kundenSortAufsteigend ? vergleich : -vergleich;
+                });
+                zeilen.forEach(z => kundenTbody.appendChild(z));
+
+                document.querySelectorAll('#kundenTabelle th.sortierbar i').forEach(i => i.className = 'bi bi-arrow-down-up small text-muted');
+                th.querySelector('i').className = 'bi bi-arrow-' + (kundenSortAufsteigend ? 'up' : 'down') + ' small';
+            });
         });
     </script>
 </body>
