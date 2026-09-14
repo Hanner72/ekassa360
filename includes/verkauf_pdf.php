@@ -89,8 +89,8 @@ function standardPdfVorlage($typ) {
 
     $metaZeilen = [
         'angebot' => '<div>Datum: {{datum}}</div><div>Gültig bis: {{gueltig_bis}}</div>',
-        'auftrag' => '<div>Datum: {{datum}}</div><div>Leistungsdatum: {{leistungsdatum}}</div>',
-        'rechnung' => '<div>Datum: {{datum}}</div><div>Leistungsdatum: {{leistungsdatum}}</div><div>Fällig am: {{faellig_am}}</div>',
+        'auftrag' => '<div>Datum: {{datum}}</div><div>Leistungsdatum: {{leistungsdatum}}</div>{{vorgaengerhinweis}}',
+        'rechnung' => '<div>Datum: {{datum}}</div><div>Leistungsdatum: {{leistungsdatum}}</div><div>Fällig am: {{faellig_am}}</div>{{vorgaengerhinweis}}',
     ];
     $zahlungshinweisBlock = $typ === 'rechnung' ? '<div class="zahlungshinweis">{{zahlungshinweis}}</div>' : '';
 
@@ -200,6 +200,23 @@ function baueDokumentPlatzhalter($doc, $positionen, $firma) {
 
     $wasserzeichen = ($doc['status'] === 'entwurf') ? '<div class="wasserzeichen">ENTWURF</div>' : '';
 
+    // Bei umgewandelten Dokumenten (Angebot -> Auftrag -> Rechnung) die Nummer des
+    // Vorgänger-Dokuments für den Ausdruck (z.B. "Angebotsnummer" auf dem Auftrag).
+    $vorgaengerNummer = '';
+    $vorgaengerTypLabel = '';
+    if (!empty($doc['vorgaenger_id'])) {
+        $stmt = db()->prepare("SELECT typ, nummer FROM verkaufsdokumente WHERE id = ?");
+        $stmt->execute([$doc['vorgaenger_id']]);
+        $vorgaenger = $stmt->fetch();
+        if ($vorgaenger && !empty($vorgaenger['nummer'])) {
+            $vorgaengerNummer = $vorgaenger['nummer'];
+            $vorgaengerTypLabel = $typLabels[$vorgaenger['typ']] ?? ucfirst($vorgaenger['typ']);
+        }
+    }
+    $vorgaengerHinweis = $vorgaengerNummer !== ''
+        ? '<div>' . htmlspecialchars($vorgaengerTypLabel) . ': ' . htmlspecialchars($vorgaengerNummer) . '</div>'
+        : '';
+
     $firmaLogo = '';
     if (!empty($firma['logo_data']) && !empty($firma['logo_mime'])) {
         $firmaLogo = '<img src="data:' . htmlspecialchars($firma['logo_mime']) . ';base64,' . $firma['logo_data'] . '" class="firma-logo" alt="Logo">';
@@ -234,6 +251,9 @@ function baueDokumentPlatzhalter($doc, $positionen, $firma) {
         '{{summenblock}}' => $summenblock,
         '{{zahlungshinweis}}' => $zahlungshinweis,
         '{{wasserzeichen}}' => $wasserzeichen,
+        '{{vorgaenger_nummer}}' => htmlspecialchars($vorgaengerNummer),
+        '{{vorgaenger_typ_label}}' => htmlspecialchars($vorgaengerTypLabel),
+        '{{vorgaengerhinweis}}' => $vorgaengerHinweis,
     ];
 }
 

@@ -328,22 +328,30 @@ $rhythmusLabels = ['monatlich' => 'Monatlich', 'quartalsweise' => 'Quartalsweise
             document.getElementById('r_notizen').value = r.notizen || '';
         }
 
+        // Bei einem rein programmatischen .show()-Aufruf (Vorbelegung beim Laden der Seite,
+        // siehe unten) ist event.relatedTarget immer null - die reine relatedTarget-Prüfung
+        // kann also nicht zwischen "Neue Regel"-Button und einer bereits vorbelegten
+        // Öffnung unterscheiden. Deshalb zusätzlich ein explizites Flag.
+        let regelModalVorbelegt = false;
         document.getElementById('regelModal').addEventListener('show.bs.modal', function (event) {
-            if (!event.relatedTarget || !event.relatedTarget.hasAttribute('onclick')) {
+            if (!regelModalVorbelegt && (!event.relatedTarget || !event.relatedTarget.hasAttribute('onclick'))) {
                 document.getElementById('r_modalTitle').innerHTML = '<i class="bi bi-arrow-repeat me-2"></i>Neue wiederkehrende Rechnung';
                 this.querySelector('form').reset();
                 document.getElementById('r_id').value = '';
             }
+            regelModalVorbelegt = false;
         });
 
         <?php if ($editRegel): ?>
         document.addEventListener('DOMContentLoaded', function() {
+            regelModalVorbelegt = true;
             editRegel(<?= json_encode($editRegel) ?>);
             new bootstrap.Modal(document.getElementById('regelModal')).show();
         });
         <?php elseif ($vorausgewaehlteVorlage): ?>
         // Von auftraege.php "In wiederkehrende Rechnung umwandeln" verlinkt - Neue-Regel-Formular vorbelegen.
         document.addEventListener('DOMContentLoaded', function() {
+            regelModalVorbelegt = true;
             document.getElementById('r_vorlage').value = <?= (int)$vorausgewaehlteVorlage['id'] ?>;
             document.getElementById('r_kunde_id').value = <?= (int)($vorausgewaehlteVorlage['kunde_id'] ?? 0) ?>;
             document.getElementById('r_bezeichnung').value = <?= json_encode(($vorausgewaehlteVorlage['betreff'] ?: kundenAnzeigename($vorausgewaehlteVorlage)) ?: '') ?>;

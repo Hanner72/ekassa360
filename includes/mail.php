@@ -267,6 +267,14 @@ function sendeVerkaufsdokumentEmail($verkaufsdokumentId, $empfaengerEmail = null
     $db->prepare("UPDATE verkaufsdokumente SET versendet_am = NOW(), versendet_an = ? WHERE id = ?")
        ->execute([$empfaenger, $verkaufsdokumentId]);
 
+    // Angebote und Aufträge: erster erfolgreicher E-Mail-Versand hebt den Status von
+    // 'erstellt' auf 'versendet' (siehe finalizeAngebotOderAuftrag()). Bereits weiter
+    // fortgeschrittene Dokumente (z.B. schon in einen Auftrag/eine Rechnung umgewandelt)
+    // bleiben unverändert, ein erneuter Versand darf den Status nicht zurückdrehen.
+    if (in_array($doc['typ'], ['angebot', 'auftrag'], true) && $doc['status'] === 'erstellt') {
+        $db->prepare("UPDATE verkaufsdokumente SET status = 'versendet' WHERE id = ?")->execute([$verkaufsdokumentId]);
+    }
+
     if (function_exists('logAction')) {
         logAction('verkaufsdokumente', $verkaufsdokumentId, 'geaendert', "Per E-Mail versendet an $empfaenger");
     }

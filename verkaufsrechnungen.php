@@ -155,6 +155,8 @@ foreach ($liste as $d) {
     }
 }
 
+$statusBadges = ['entwurf' => 'secondary', 'abgeschlossen' => 'success', 'storniert' => 'dark'];
+$statusLabels = ['entwurf' => 'Entwurf', 'abgeschlossen' => 'Abgeschlossen', 'storniert' => 'Storniert'];
 $pageTitle = 'Verkaufsrechnungen';
 ?>
 <!DOCTYPE html>
@@ -299,7 +301,7 @@ $pageTitle = 'Verkaufsrechnungen';
                 <div class="card">
                     <div class="card-body">
                         <p><strong>Kunde:</strong> <?= htmlspecialchars(kundenAnzeigename($dokument)) ?></p>
-                        <p><strong>Status:</strong> <?= htmlspecialchars(ucfirst($dokument['status'])) ?>
+                        <p><strong>Status:</strong> <?= htmlspecialchars($statusLabels[$dokument['status']] ?? ucfirst($dokument['status'])) ?>
                             <?php if ($zs['finalisiert']): ?>
                                 - <span class="badge bg-<?= $zs['bezahlt'] ? 'success' : 'warning text-dark' ?>"><?= $zs['bezahlt'] ? 'Bezahlt' : 'Offen' ?></span>
                             <?php endif; ?>
@@ -336,14 +338,27 @@ $pageTitle = 'Verkaufsrechnungen';
                 <div class="alert alert-secondary"><i class="bi bi-info-circle me-1"></i>paperless-ngx-Integration ist nicht konfiguriert (config/paperless.php) - Rechnungen werden ohne automatische Archivierung finalisiert.</div>
                 <?php endif; ?>
 
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="input-group">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input type="text" class="form-control" id="rechnungenSuche" placeholder="Suche nach Nummer, Kunde, Status...">
+                        </div>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-body p-0">
                         <div class="table-responsive">
-                            <table class="table table-hover mb-0">
+                            <table class="table table-hover mb-0" id="rechnungenTabelle">
                                 <thead class="table-light">
                                     <tr>
-                                        <th>Nummer</th><th>Datum</th><th>Kunde</th>
-                                        <th class="text-end">Brutto</th><th>Status</th><th>Zahlung</th><th>paperless</th><th class="text-end">Aktionen</th>
+                                        <th class="sortierbar" data-spalte="0">Nummer <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th class="sortierbar" data-spalte="1">Datum <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th class="sortierbar" data-spalte="2">Kunde <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th class="text-end sortierbar" data-spalte="3">Brutto <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th class="sortierbar" data-spalte="4">Status <i class="bi bi-arrow-down-up small text-muted"></i></th>
+                                        <th>Zahlung</th><th>paperless</th><th class="text-end">Aktionen</th>
                                     </tr>
                                 </thead>
                                 <tbody>
@@ -351,15 +366,12 @@ $pageTitle = 'Verkaufsrechnungen';
                                     <tr><td colspan="8" class="text-center text-muted py-4">Keine Rechnungen vorhanden</td></tr>
                                     <?php else: foreach ($liste as $d): $zs = $zahlungsstatusMap[$d['id']] ?? null; ?>
                                     <tr>
-                                        <td><?= htmlspecialchars($d['nummer'] ?: '(Entwurf #' . $d['id'] . ')') ?></td>
-                                        <td><?= formatDatum($d['datum']) ?></td>
+                                        <td data-sortwert="<?= htmlspecialchars($d['nummer'] ?? '') ?>"><?= htmlspecialchars($d['nummer'] ?: '(Entwurf #' . $d['id'] . ')') ?></td>
+                                        <td data-sortwert="<?= $d['datum'] ?>"><?= formatDatum($d['datum']) ?></td>
                                         <td><?= htmlspecialchars(kundenAnzeigename($d)) ?></td>
-                                        <td class="text-end"><?= formatBetrag($d['brutto_gesamt']) ?></td>
+                                        <td class="text-end" data-sortwert="<?= $d['brutto_gesamt'] ?>"><?= formatBetrag($d['brutto_gesamt']) ?></td>
                                         <td>
-                                            <?php
-                                            $statusBadges = ['entwurf' => 'secondary', 'abgeschlossen' => 'success', 'storniert' => 'dark'];
-                                            ?>
-                                            <span class="badge bg-<?= $statusBadges[$d['status']] ?? 'secondary' ?>"><?= ucfirst($d['status']) ?></span>
+                                            <span class="badge bg-<?= $statusBadges[$d['status']] ?? 'secondary' ?>"><?= $statusLabels[$d['status']] ?? ucfirst($d['status']) ?></span>
                                         </td>
                                         <td>
                                             <?php if ($zs && $zs['finalisiert']): ?>
@@ -387,6 +399,9 @@ $pageTitle = 'Verkaufsrechnungen';
                                         <td class="text-end">
                                             <?php if ($d['status'] === 'entwurf'): ?>
                                             <a href="verkaufsrechnungen.php?action=edit&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+                                            <a href="pdf_verkaufsdokument.php?id=<?= $d['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary" title="Vorschau (Entwurf, mit Wasserzeichen)">
+                                                <i class="bi bi-file-earmark-pdf"></i>
+                                            </a>
                                             <form method="POST" class="d-inline">
                                                 <input type="hidden" name="action" value="finalisieren">
                                                 <input type="hidden" name="id" value="<?= $d['id'] ?>">
@@ -680,6 +695,61 @@ $pageTitle = 'Verkaufsrechnungen';
             addPositionRow();
         }
         berechneGesamtsummen();
+
+        // Suche: filtert Zeilen client-seitig über alle sichtbaren Spalten
+        const rechnungenSucheFeld = document.getElementById('rechnungenSuche');
+        const rechnungenTbody = document.querySelector('#rechnungenTabelle tbody');
+        rechnungenSucheFeld?.addEventListener('input', function() {
+            const suchbegriff = this.value.trim().toLowerCase();
+            rechnungenTbody.querySelectorAll('tr').forEach(function(zeile) {
+                if (!zeile.cells || zeile.cells.length < 7) return; // "Keine Rechnungen vorhanden"-Zeile überspringen
+                const text = zeile.textContent.toLowerCase();
+                zeile.classList.toggle('d-none', suchbegriff !== '' && !text.includes(suchbegriff));
+            });
+        });
+
+        // Sortierung: Klick auf Spaltenkopf sortiert die Tabellenzeilen auf-/absteigend.
+        // Standard beim Laden: Nummer (Spalte 0) absteigend.
+        let rechnungenSortSpalte = null;
+        let rechnungenSortAufsteigend = true;
+        function rechnungenSortiereNach(spalte, aufsteigend) {
+            rechnungenSortSpalte = spalte;
+            rechnungenSortAufsteigend = aufsteigend;
+
+            const zeilen = Array.from(rechnungenTbody.querySelectorAll('tr')).filter(z => z.cells && z.cells.length >= 7);
+            zeilen.sort(function(a, b) {
+                const zelleA = a.cells[spalte];
+                const zelleB = b.cells[spalte];
+                const wertA = zelleA.dataset.sortwert ?? zelleA.textContent.trim().toLowerCase();
+                const wertB = zelleB.dataset.sortwert ?? zelleB.textContent.trim().toLowerCase();
+                const zahlenMuster = /^-?\d+(\.\d+)?$/;
+                let vergleich;
+                if (zahlenMuster.test(wertA) && zahlenMuster.test(wertB)) {
+                    vergleich = parseFloat(wertA) - parseFloat(wertB);
+                } else {
+                    vergleich = wertA.localeCompare(wertB, 'de');
+                }
+                return aufsteigend ? vergleich : -vergleich;
+            });
+            zeilen.forEach(z => rechnungenTbody.appendChild(z));
+
+            document.querySelectorAll('#rechnungenTabelle th.sortierbar i').forEach(i => i.className = 'bi bi-arrow-down-up small text-muted');
+            const th = document.querySelector('#rechnungenTabelle th.sortierbar[data-spalte="' + spalte + '"]');
+            if (th) th.querySelector('i').className = 'bi bi-arrow-' + (aufsteigend ? 'up' : 'down') + ' small';
+        }
+
+        document.querySelectorAll('#rechnungenTabelle th.sortierbar').forEach(function(th) {
+            th.style.cursor = 'pointer';
+            th.addEventListener('click', function() {
+                const spalte = parseInt(th.dataset.spalte, 10);
+                const aufsteigend = (rechnungenSortSpalte === spalte) ? !rechnungenSortAufsteigend : true;
+                rechnungenSortiereNach(spalte, aufsteigend);
+            });
+        });
+
+        if (rechnungenTbody) {
+            rechnungenSortiereNach(0, false);
+        }
     </script>
 </body>
 </html>

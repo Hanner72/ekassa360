@@ -438,7 +438,7 @@ function getVerkaufsdokumente($typ, $filters = []) {
     }
 
     $whereClause = implode(' AND ', $where);
-    $sql = "SELECT v.*, k.firma_name, k.vorname, k.nachname
+    $sql = "SELECT v.*, k.firma_name, k.vorname, k.nachname, k.email
             FROM verkaufsdokumente v
             LEFT JOIN kunden k ON v.kunde_id = k.id
             WHERE $whereClause
@@ -668,7 +668,10 @@ function umwandelnVerkaufsdokument($id, $neuerTyp) {
             ]);
         }
 
-        $neuerStatus = $doc['typ'] === 'angebot' ? 'angenommen' : 'abgeschlossen';
+        // 'abgeschlossen' bleibt der eigene, unabhängige "finalisiert"-Status von Rechnungen
+        // (siehe finalizeVerkaufsrechnung()) - hier geht es um den jeweiligen QUELL-Beleg, der
+        // in einen Folgebeleg umgewandelt wurde, deshalb eigene Werte pro Dokumenttyp.
+        $neuerStatus = $doc['typ'] === 'angebot' ? 'auftrag_erstellt' : 'rechnung_erstellt';
         $db->prepare("UPDATE verkaufsdokumente SET status = ? WHERE id = ?")->execute([$neuerStatus, $id]);
 
         $db->commit();
@@ -797,9 +800,11 @@ function zieheArtikelnummer($artikelgruppeId = null, $artikeluntergruppeId = nul
 
 /**
  * Finalisiert ein Angebot oder einen Auftrag: vergibt eine Nummer aus dem passenden
- * Nummernkreis, setzt status='versendet' (danach nicht mehr editierbar/löschbar - siehe
- * saveVerkaufsdokument()/deleteVerkaufsdokument()). Erzeugt - anders als
- * finalizeVerkaufsrechnung() - KEINE Ledger-Zeilen, da Angebote/Aufträge steuerlich
+ * Nummernkreis (danach nicht mehr editierbar/löschbar - siehe
+ * saveVerkaufsdokument()/deleteVerkaufsdokument()). Status danach: 'erstellt' (finalisiert/
+ * nummeriert, aber noch nicht per E-Mail verschickt - getrennt von 'versendet', das erst beim
+ * ersten erfolgreichen Versand gesetzt wird, siehe sendeVerkaufsdokumentEmail()). Erzeugt -
+ * anders als finalizeVerkaufsrechnung() - KEINE Ledger-Zeilen, da Angebote/Aufträge steuerlich
  * nicht relevant sind.
  */
 function finalizeAngebotOderAuftrag($verkaufsdokumentId) {
@@ -823,11 +828,16 @@ function finalizeAngebotOderAuftrag($verkaufsdokumentId) {
     $benutzer_id = $_SESSION['benutzer_id'] ?? null;
     $jahr = (int)date('Y', strtotime($doc['datum']));
 
+    // Angebote UND Aufträge: 'erstellt' (finalisiert/nummeriert, aber noch nicht per E-Mail
+    // versendet - siehe sendeVerkaufsdokumentEmail(), die 'erstellt' -> 'versendet' hebt,
+    // sobald der erste Versand erfolgreich war).
+    $neuerStatus = 'erstellt';
+
     try {
         $db->beginTransaction();
         $nummer = zieheNummernkreisNummer($doc['typ'], $jahr, $doc['datum']);
-        $db->prepare("UPDATE verkaufsdokumente SET status = 'versendet', nummer = ?, geaendert_von = ? WHERE id = ?")
-           ->execute([$nummer, $benutzer_id, $verkaufsdokumentId]);
+        $db->prepare("UPDATE verkaufsdokumente SET status = ?, nummer = ?, geaendert_von = ? WHERE id = ?")
+           ->execute([$neuerStatus, $nummer, $benutzer_id, $verkaufsdokumentId]);
         $db->commit();
     } catch (Exception $e) {
         $db->rollBack();
