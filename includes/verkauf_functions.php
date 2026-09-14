@@ -153,12 +153,16 @@ function deleteKunde($id) {
 
 function getAlleArtikel($nurAktiv = true) {
     $db = db();
-    $sql = "SELECT a.*, u.satz AS ust_prozent, u.bezeichnung AS ust_bezeichnung, k.name AS kategorie_name
+    $sql = "SELECT a.*, u.satz AS ust_prozent, u.bezeichnung AS ust_bezeichnung, k.name AS kategorie_name,
+                   g.name AS artikelgruppe_name, g.kurzbezeichnung AS artikelgruppe_kurz,
+                   ug.name AS artikeluntergruppe_name, ug.kurzbezeichnung AS artikeluntergruppe_kurz
             FROM artikel a
             LEFT JOIN ust_saetze u ON a.ust_satz_id = u.id
-            LEFT JOIN kategorien k ON a.kategorie_id = k.id";
+            LEFT JOIN kategorien k ON a.kategorie_id = k.id
+            LEFT JOIN artikelgruppen g ON a.artikelgruppe_id = g.id
+            LEFT JOIN artikeluntergruppen ug ON a.artikeluntergruppe_id = ug.id";
     if ($nurAktiv) $sql .= " WHERE a.aktiv = 1";
-    $sql .= " ORDER BY a.bezeichnung";
+    $sql .= " ORDER BY a.artikelnummer ASC";
     return $db->query($sql)->fetchAll();
 }
 
@@ -177,16 +181,18 @@ function saveArtikel($data) {
     $einheit = ($data['einheit'] ?? null) ?: 'Stk';
     $ustSatzId = $data['ust_satz_id'] ?? null;
     $kategorieId = $data['kategorie_id'] ?? null;
+    $artikelgruppeId = $data['artikelgruppe_id'] ?? null;
+    $artikeluntergruppeId = $data['artikeluntergruppe_id'] ?? null;
     $aktiv = $data['aktiv'] ?? 1;
 
     if (!empty($data['id'])) {
         $stmt = $db->prepare("UPDATE artikel SET
-            artikelnummer=?, bezeichnung=?, beschreibung=?, einheit=?, einzelpreis_netto=?, ust_satz_id=?, kategorie_id=?, aktiv=?
+            artikelnummer=?, bezeichnung=?, beschreibung=?, einheit=?, einzelpreis_netto=?, ust_satz_id=?, kategorie_id=?, artikelgruppe_id=?, artikeluntergruppe_id=?, aktiv=?
             WHERE id=?");
         $result = $stmt->execute([
             $artikelnummer ?: null, $data['bezeichnung'], $beschreibung ?: null,
             $einheit, $data['einzelpreis_netto'], $ustSatzId ?: null,
-            $kategorieId ?: null, $aktiv, $data['id']
+            $kategorieId ?: null, $artikelgruppeId ?: null, $artikeluntergruppeId ?: null, $aktiv, $data['id']
         ]);
         if ($result && function_exists('logAction')) {
             logAction('artikel', $data['id'], 'geaendert', 'Artikel bearbeitet: ' . $data['bezeichnung']);
@@ -194,15 +200,29 @@ function saveArtikel($data) {
         return $result;
     }
 
-    $stmt = $db->prepare("INSERT INTO artikel
-        (artikelnummer, bezeichnung, beschreibung, einheit, einzelpreis_netto, ust_satz_id, kategorie_id, aktiv)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)");
-    $stmt->execute([
-        $artikelnummer ?: null, $data['bezeichnung'], $beschreibung ?: null,
-        $einheit, $data['einzelpreis_netto'], $ustSatzId ?: null,
-        $kategorieId ?: null, $aktiv
-    ]);
-    $id = $db->lastInsertId();
+    // Neuer Artikel ohne manuell angegebene Artikelnummer: automatisch aus dem Nummernkreis
+    // ziehen (siehe zieheArtikelnummer() - jahresunabhängig, Kurzbezeichnungen von Artikelgruppe
+    // {KURZ} und Artikeluntergruppe {UKURZ} fließen ins Format ein - NICHT die Buchungs-Kategorie).
+    $db->beginTransaction();
+    try {
+        if (empty($artikelnummer)) {
+            $artikelnummer = zieheArtikelnummer($artikelgruppeId ?: null, $artikeluntergruppeId ?: null);
+        }
+        $stmt = $db->prepare("INSERT INTO artikel
+            (artikelnummer, bezeichnung, beschreibung, einheit, einzelpreis_netto, ust_satz_id, kategorie_id, artikelgruppe_id, artikeluntergruppe_id, aktiv)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $artikelnummer, $data['bezeichnung'], $beschreibung ?: null,
+            $einheit, $data['einzelpreis_netto'], $ustSatzId ?: null,
+            $kategorieId ?: null, $artikelgruppeId ?: null, $artikeluntergruppeId ?: null, $aktiv
+        ]);
+        $id = $db->lastInsertId();
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        throw $e;
+    }
+
     if ($id && function_exists('logAction')) {
         logAction('artikel', $id, 'erstellt', 'Artikel erstellt: ' . $data['bezeichnung']);
     }
@@ -213,6 +233,181 @@ function toggleArtikelAktiv($id) {
     $db = db();
     $stmt = $db->prepare("UPDATE artikel SET aktiv = NOT aktiv WHERE id = ?");
     return $stmt->execute([$id]);
+}
+
+/**
+ * IDs aller Artikel, die bereits in mindestens einer Angebots-/Auftrags-/Rechnungsposition
+ * verwendet werden - für die Liste (Löschen-Button ausblenden) und als Sperre in
+ * deleteArtikel().
+ */
+function getArtikelIdsInVerwendung() {
+    $db = db();
+    return $db->query("SELECT DISTINCT artikel_id FROM verkaufsdokument_positionen WHERE artikel_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+}
+
+/**
+ * Artikel löschen - nur erlaubt, wenn er noch in keiner Angebots-/Auftrags-/Rechnungsposition
+ * verwendet wird (die Fremdschlüssel-Spalte verkaufsdokument_positionen.artikel_id ist
+ * ON DELETE SET NULL, würde also sonst bestehende Positionen stillschweigend vom Artikel
+ * abkoppeln).
+ */
+function deleteArtikel($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM verkaufsdokument_positionen WHERE artikel_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Artikel kann nicht gelöscht werden - er wird bereits in einem Angebot, Auftrag oder einer Rechnung verwendet. Bitte stattdessen deaktivieren.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM artikel WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('artikel', $id, 'geloescht', 'Artikel gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
+// ARTIKELGRUPPEN (rein organisatorisch, z.B. "T-Shirts", "Hoodies" - unabhängig von den
+// Buchungs-Kategorien in kategorien/E1a)
+// ============================================
+
+function getAlleArtikelgruppen($nurAktiv = true) {
+    $db = db();
+    $sql = "SELECT * FROM artikelgruppen";
+    if ($nurAktiv) $sql .= " WHERE aktiv = 1";
+    $sql .= " ORDER BY name";
+    return $db->query($sql)->fetchAll();
+}
+
+function saveArtikelgruppe($data) {
+    $db = db();
+    $name = trim($data['name'] ?? '');
+    $kurz = trim($data['kurzbezeichnung'] ?? '') ?: null;
+    $aktiv = $data['aktiv'] ?? 1;
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE artikelgruppen SET name=?, kurzbezeichnung=?, aktiv=? WHERE id=?");
+        $stmt->execute([$name, $kurz, $aktiv, $data['id']]);
+        return $data['id'];
+    }
+
+    $stmt = $db->prepare("INSERT INTO artikelgruppen (name, kurzbezeichnung, aktiv) VALUES (?, ?, ?)");
+    $stmt->execute([$name, $kurz, $aktiv]);
+    return $db->lastInsertId();
+}
+
+/**
+ * Artikelgruppen inkl. Anzahl zugeordneter Artikel - für die Verwaltungsliste (Löschen nur
+ * möglich, wenn kein Artikel mehr in dieser Gruppe ist, siehe deleteArtikelgruppe()).
+ */
+function getAlleArtikelgruppenMitAnzahl() {
+    $db = db();
+    return $db->query("SELECT g.*, COUNT(a.id) AS anzahl_artikel
+                        FROM artikelgruppen g
+                        LEFT JOIN artikel a ON a.artikelgruppe_id = g.id
+                        GROUP BY g.id
+                        ORDER BY g.kurzbezeichnung ASC")->fetchAll();
+}
+
+/**
+ * Artikelgruppe löschen - nur erlaubt, wenn ihr kein Artikel mehr angehört, weder direkt
+ * noch über eine ihrer Untergruppen (die Fremdschlüssel sind ON DELETE SET NULL/CASCADE,
+ * würden also sonst bestehende Artikel/Untergruppen stillschweigend abkoppeln).
+ */
+function deleteArtikelgruppe($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM artikel
+        WHERE artikelgruppe_id = ?
+        OR artikeluntergruppe_id IN (SELECT id FROM artikeluntergruppen WHERE artikelgruppe_id = ?)");
+    $stmt->execute([$id, $id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Artikelgruppe kann nicht gelöscht werden - es sind noch Artikel zugeordnet (auch über eine Untergruppe).'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM artikelgruppen WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('artikelgruppen', $id, 'geloescht', 'Artikelgruppe gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
+// ARTIKELUNTERGRUPPEN (zweite Ebene unter Artikelgruppen, z.B. Gruppe "Textilien" ->
+// Untergruppen "T-Shirts", "Hoodies")
+// ============================================
+
+function getAlleArtikeluntergruppen($artikelgruppeId = null, $nurAktiv = true) {
+    $db = db();
+    $where = [];
+    $params = [];
+    if ($artikelgruppeId) {
+        $where[] = "artikelgruppe_id = ?";
+        $params[] = $artikelgruppeId;
+    }
+    if ($nurAktiv) {
+        $where[] = "aktiv = 1";
+    }
+    $sql = "SELECT * FROM artikeluntergruppen";
+    if ($where) $sql .= " WHERE " . implode(' AND ', $where);
+    $sql .= " ORDER BY kurzbezeichnung ASC";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+function saveArtikeluntergruppe($data) {
+    $db = db();
+    $name = trim($data['name'] ?? '');
+    $kurz = trim($data['kurzbezeichnung'] ?? '') ?: null;
+    $gruppeId = $data['artikelgruppe_id'] ?? null;
+    $aktiv = $data['aktiv'] ?? 1;
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE artikeluntergruppen SET name=?, kurzbezeichnung=?, aktiv=? WHERE id=?");
+        $stmt->execute([$name, $kurz, $aktiv, $data['id']]);
+        return $data['id'];
+    }
+
+    $stmt = $db->prepare("INSERT INTO artikeluntergruppen (artikelgruppe_id, name, kurzbezeichnung, aktiv) VALUES (?, ?, ?, ?)");
+    $stmt->execute([$gruppeId, $name, $kurz, $aktiv]);
+    return $db->lastInsertId();
+}
+
+/**
+ * Artikeluntergruppen inkl. übergeordneter Gruppe und Anzahl zugeordneter Artikel - für die
+ * Verwaltungsliste (Löschen/Bearbeiten nur möglich, wenn kein Artikel mehr in dieser
+ * Untergruppe ist, siehe deleteArtikeluntergruppe()).
+ */
+function getAlleArtikeluntergruppenMitAnzahl() {
+    $db = db();
+    return $db->query("SELECT u.*, g.name AS gruppe_name, g.kurzbezeichnung AS gruppe_kurz,
+                               COUNT(a.id) AS anzahl_artikel
+                        FROM artikeluntergruppen u
+                        JOIN artikelgruppen g ON u.artikelgruppe_id = g.id
+                        LEFT JOIN artikel a ON a.artikeluntergruppe_id = u.id
+                        GROUP BY u.id
+                        ORDER BY g.kurzbezeichnung ASC, u.kurzbezeichnung ASC")->fetchAll();
+}
+
+/**
+ * Artikeluntergruppe löschen - nur erlaubt, wenn ihr kein Artikel mehr angehört.
+ */
+function deleteArtikeluntergruppe($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM artikel WHERE artikeluntergruppe_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Artikeluntergruppe kann nicht gelöscht werden - es sind noch Artikel zugeordnet.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM artikeluntergruppen WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('artikeluntergruppen', $id, 'geloescht', 'Artikeluntergruppe gelöscht');
+    }
+    return ['success' => $result];
 }
 
 // ============================================
@@ -527,6 +722,7 @@ function zieheNummernkreisNummer($schluessel, $jahr, $datum) {
         'angebot' => 'AN-{JJJJ}-{NNNN}',
         'auftrag' => 'AU-{JJJJ}-{NNNN}',
         'kunde' => 'K-{NNNN}',
+        'artikel' => '{KURZ}-{NNNN}',
     ];
 
     $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE schluessel = ? AND jahr = ? FOR UPDATE");
@@ -553,6 +749,31 @@ function zieheNummernkreisNummer($schluessel, $jahr, $datum) {
  */
 function zieheKundennummer() {
     return zieheNummernkreisNummer('kunde', 0, date('Y-m-d'));
+}
+
+/**
+ * Artikelnummer aus dem Nummernkreis ziehen - ebenfalls jahresunabhängig (fortlaufender
+ * Katalog, kein Jahresbezug). Die Platzhalter {KURZ} (Artikelgruppe, z.B. "Textilien" -> "TSH")
+ * und {UKURZ} (Artikeluntergruppe, z.B. "T-Shirts" -> "TSHI") werden NICHT von
+ * formatiereNummernkreisNummer() aufgelöst (der kennt nur Datum/laufende Nummer), sondern
+ * hier nachträglich ersetzt - bewusst getrennt von den Buchungs-Kategorien (kategorien-Tabelle).
+ */
+function zieheArtikelnummer($artikelgruppeId = null, $artikeluntergruppeId = null) {
+    $db = db();
+    $kurzGruppe = '';
+    if ($artikelgruppeId) {
+        $stmt = $db->prepare("SELECT kurzbezeichnung FROM artikelgruppen WHERE id = ?");
+        $stmt->execute([$artikelgruppeId]);
+        $kurzGruppe = $stmt->fetchColumn() ?: '';
+    }
+    $kurzUntergruppe = '';
+    if ($artikeluntergruppeId) {
+        $stmt = $db->prepare("SELECT kurzbezeichnung FROM artikeluntergruppen WHERE id = ?");
+        $stmt->execute([$artikeluntergruppeId]);
+        $kurzUntergruppe = $stmt->fetchColumn() ?: '';
+    }
+    $nummer = zieheNummernkreisNummer('artikel', 0, date('Y-m-d'));
+    return str_replace(['{KURZ}', '{UKURZ}'], [$kurzGruppe, $kurzUntergruppe], $nummer);
 }
 
 /**
