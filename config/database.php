@@ -49,3 +49,9 @@ class Database {
 function db() {
     return Database::getInstance()->getConnection();
 }
+
+// Automatischer Migrations-Runner: wendet neue database/add_*.sql-Dateien bei Bedarf an
+// (siehe includes/migrations.php) - läuft bei jedem Request, damit ein reiner Datei-Push
+// auf den Live-Server ohne manuellen DB-Schritt auskommt.
+require_once __DIR__ . '/../includes/migrations.php';
+fuehreAusstehendeMigrationenAus();

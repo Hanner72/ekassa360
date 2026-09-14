@@ -722,7 +722,6 @@ function zieheNummernkreisNummer($schluessel, $jahr, $datum) {
         'angebot' => 'AN-{JJJJ}-{NNNN}',
         'auftrag' => 'AU-{JJJJ}-{NNNN}',
         'kunde' => 'K-{NNNN}',
-        'artikel' => '{KURZ}-{NNNN}',
     ];
 
     $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE schluessel = ? AND jahr = ? FOR UPDATE");
@@ -752,28 +751,48 @@ function zieheKundennummer() {
 }
 
 /**
- * Artikelnummer aus dem Nummernkreis ziehen - ebenfalls jahresunabhängig (fortlaufender
- * Katalog, kein Jahresbezug). Die Platzhalter {KURZ} (Artikelgruppe, z.B. "Textilien" -> "TSH")
- * und {UKURZ} (Artikeluntergruppe, z.B. "T-Shirts" -> "TSHI") werden NICHT von
- * formatiereNummernkreisNummer() aufgelöst (der kennt nur Datum/laufende Nummer), sondern
- * hier nachträglich ersetzt - bewusst getrennt von den Buchungs-Kategorien (kategorien-Tabelle).
+ * Artikelnummer ziehen - der Zähler läuft PRO Artikeluntergruppe (bzw. wenn keine
+ * Untergruppe gewählt ist, pro Artikelgruppe; ist auch keine Gruppe gewählt, über einen
+ * gemeinsamen Fallback-Zähler). Anders als bei Angebot/Auftrag/Rechnung/Kunde ist das
+ * Format bewusst NICHT über die Nummernkreise-Einstellungen konfigurierbar - nur die
+ * Kurzbezeichnungen von Artikelgruppe/-untergruppe (Artikelgruppen-Verwaltung in artikel.php).
+ * SELECT ... FOR UPDATE verhindert doppelte Nummern bei gleichzeitigem Anlegen; muss
+ * innerhalb einer bereits offenen Transaktion aufgerufen werden (siehe saveArtikel()).
  */
 function zieheArtikelnummer($artikelgruppeId = null, $artikeluntergruppeId = null) {
     $db = db();
-    $kurzGruppe = '';
-    if ($artikelgruppeId) {
-        $stmt = $db->prepare("SELECT kurzbezeichnung FROM artikelgruppen WHERE id = ?");
-        $stmt->execute([$artikelgruppeId]);
-        $kurzGruppe = $stmt->fetchColumn() ?: '';
-    }
-    $kurzUntergruppe = '';
+
     if ($artikeluntergruppeId) {
-        $stmt = $db->prepare("SELECT kurzbezeichnung FROM artikeluntergruppen WHERE id = ?");
+        $stmt = $db->prepare("SELECT ug.naechste_nummer, ug.kurzbezeichnung AS ukurz, g.kurzbezeichnung AS kurz
+                              FROM artikeluntergruppen ug
+                              JOIN artikelgruppen g ON g.id = ug.artikelgruppe_id
+                              WHERE ug.id = ? FOR UPDATE");
         $stmt->execute([$artikeluntergruppeId]);
-        $kurzUntergruppe = $stmt->fetchColumn() ?: '';
+        $row = $stmt->fetch();
+        if ($row) {
+            $nummer = ($row['kurz'] ?? '') . ($row['ukurz'] ?? '') . str_pad($row['naechste_nummer'], 3, '0', STR_PAD_LEFT);
+            $db->prepare("UPDATE artikeluntergruppen SET naechste_nummer = naechste_nummer + 1 WHERE id = ?")->execute([$artikeluntergruppeId]);
+            return $nummer;
+        }
     }
-    $nummer = zieheNummernkreisNummer('artikel', 0, date('Y-m-d'));
-    return str_replace(['{KURZ}', '{UKURZ}'], [$kurzGruppe, $kurzUntergruppe], $nummer);
+
+    if ($artikelgruppeId) {
+        $stmt = $db->prepare("SELECT naechste_nummer, kurzbezeichnung FROM artikelgruppen WHERE id = ? FOR UPDATE");
+        $stmt->execute([$artikelgruppeId]);
+        $row = $stmt->fetch();
+        if ($row) {
+            $nummer = ($row['kurzbezeichnung'] ?? '') . str_pad($row['naechste_nummer'], 3, '0', STR_PAD_LEFT);
+            $db->prepare("UPDATE artikelgruppen SET naechste_nummer = naechste_nummer + 1 WHERE id = ?")->execute([$artikelgruppeId]);
+            return $nummer;
+        }
+    }
+
+    // Weder Gruppe noch Untergruppe gewählt: gemeinsamer Fallback-Zähler.
+    $stmt = $db->prepare("SELECT naechste_nummer FROM artikel_zaehler_ohne_gruppe WHERE id = 1 FOR UPDATE");
+    $stmt->execute();
+    $naechsteNummer = $stmt->fetchColumn();
+    $db->exec("UPDATE artikel_zaehler_ohne_gruppe SET naechste_nummer = naechste_nummer + 1 WHERE id = 1");
+    return 'ART' . str_pad($naechsteNummer, 3, '0', STR_PAD_LEFT);
 }
 
 /**
