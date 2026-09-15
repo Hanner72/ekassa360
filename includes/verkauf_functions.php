@@ -411,6 +411,105 @@ function deleteArtikeluntergruppe($id) {
 }
 
 // ============================================
+// FIRMENPROFILE (mehrere Marken-Namen + Logos, z.B. bei mehreren Firmenzweigen -
+// auswählbar pro Angebot/Auftrag/Rechnung, siehe baueDokumentPlatzhalter() in
+// includes/verkauf_pdf.php). Adresse/UID/IBAN/Bank bleiben bewusst bei der einzigen
+// `firma`-Tabelle - nur Name+Logo sind pro Profil unterschiedlich.
+// ============================================
+
+function getAlleFirmenprofile($nurAktiv = true) {
+    $db = db();
+    $sql = "SELECT * FROM firmenprofile";
+    if ($nurAktiv) $sql .= " WHERE aktiv = 1";
+    $sql .= " ORDER BY ist_standard DESC, name";
+    return $db->query($sql)->fetchAll();
+}
+
+function getFirmenprofil($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT * FROM firmenprofile WHERE id = ?");
+    $stmt->execute([$id]);
+    return $stmt->fetch();
+}
+
+function getStandardFirmenprofil() {
+    $db = db();
+    return $db->query("SELECT * FROM firmenprofile WHERE ist_standard = 1 LIMIT 1")->fetch();
+}
+
+/**
+ * $data['logo_upload'] optional: Roh-Bytes eines neu hochgeladenen Logos (bereits per
+ * getimagesizefromstring() validiert vom Aufrufer, wie beim bestehenden Firma-Logo-Upload
+ * in einstellungen.php) + $data['logo_mime']. Ohne logo_upload bleibt ein vorhandenes Logo
+ * beim Bearbeiten erhalten, außer $data['logo_entfernen'] ist gesetzt.
+ */
+function saveFirmenprofil($data) {
+    $db = db();
+    $name = trim($data['name'] ?? '');
+    $istStandard = !empty($data['ist_standard']) ? 1 : 0;
+    $aktiv = $data['aktiv'] ?? 1;
+    $farbe1 = preg_match('/^#[0-9a-fA-F]{6}$/', $data['farbe1'] ?? '') ? $data['farbe1'] : '#0d6efd';
+    $farbe2 = preg_match('/^#[0-9a-fA-F]{6}$/', $data['farbe2'] ?? '') ? $data['farbe2'] : '#6c757d';
+
+    $logoData = null;
+    $logoMime = null;
+    if (!empty($data['id'])) {
+        $bestehend = getFirmenprofil($data['id']);
+        $logoData = $bestehend['logo_data'] ?? null;
+        $logoMime = $bestehend['logo_mime'] ?? null;
+    }
+    if (!empty($data['logo_entfernen'])) {
+        $logoData = null;
+        $logoMime = null;
+    } elseif (!empty($data['logo_upload'])) {
+        $logoData = base64_encode($data['logo_upload']);
+        $logoMime = $data['logo_mime'];
+    }
+
+    if ($istStandard) {
+        $db->exec("UPDATE firmenprofile SET ist_standard = 0");
+    }
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE firmenprofile SET name=?, logo_data=?, logo_mime=?, farbe1=?, farbe2=?, ist_standard=?, aktiv=? WHERE id=?");
+        $stmt->execute([$name, $logoData, $logoMime, $farbe1, $farbe2, $istStandard, $aktiv, $data['id']]);
+        if (function_exists('logAction')) {
+            logAction('firmenprofile', $data['id'], 'geaendert', 'Firmenprofil bearbeitet: ' . $name);
+        }
+        return $data['id'];
+    }
+
+    $stmt = $db->prepare("INSERT INTO firmenprofile (name, logo_data, logo_mime, farbe1, farbe2, ist_standard, aktiv) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute([$name, $logoData, $logoMime, $farbe1, $farbe2, $istStandard, $aktiv]);
+    $id = $db->lastInsertId();
+    if ($id && function_exists('logAction')) {
+        logAction('firmenprofile', $id, 'erstellt', 'Firmenprofil erstellt: ' . $name);
+    }
+    return $id;
+}
+
+/**
+ * Firmenprofil löschen - nur erlaubt, wenn es keinem Verkaufsdokument mehr zugeordnet ist
+ * (die Fremdschlüssel-Spalte ist ON DELETE SET NULL, würde also sonst bestehende
+ * Angebote/Aufträge/Rechnungen stillschweigend auf das Standard-Profil zurückfallen lassen).
+ */
+function deleteFirmenprofil($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM verkaufsdokumente WHERE firmenprofil_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Firmenprofil kann nicht gelöscht werden - es sind noch Dokumente zugeordnet.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM firmenprofile WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('firmenprofile', $id, 'geloescht', 'Firmenprofil gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
 // VERKAUFSDOKUMENTE (Angebot/Auftrag/Rechnung) - CRUD (nur Entwürfe editierbar)
 // ============================================
 
@@ -535,6 +634,10 @@ function saveVerkaufsdokument($data, $positionenInput) {
 
     $kundeId = $data['kunde_id'] ?? null;
     $vorgaengerId = $data['vorgaenger_id'] ?? null;
+    // Ohne explizite Angabe (z.B. beim erstmaligen Anlegen im Formular) das Standard-
+    // Firmenprofil verwenden; bei einer Umwandlung (umwandelnVerkaufsdokument()) wird das
+    // Profil des Quelldokuments durchgereicht, bleibt aber im Formular änderbar.
+    $firmenprofilId = $data['firmenprofil_id'] ?? (getStandardFirmenprofil()['id'] ?? null);
     $leistungsdatum = $data['leistungsdatum'] ?? null;
     $gueltigBis = $data['gueltig_bis'] ?? null;
     $faelligAm = $data['faellig_am'] ?? null;
@@ -557,11 +660,11 @@ function saveVerkaufsdokument($data, $positionenInput) {
         if (!empty($data['id'])) {
             $verkaufsdokumentId = $data['id'];
             $stmt = $db->prepare("UPDATE verkaufsdokumente SET
-                kunde_id=?, datum=?, leistungsdatum=?, gueltig_bis=?, faellig_am=?, betreff=?, einleitungstext=?, schlusstext=?,
+                kunde_id=?, firmenprofil_id=?, datum=?, leistungsdatum=?, gueltig_bis=?, faellig_am=?, betreff=?, einleitungstext=?, schlusstext=?,
                 gesamtrabatt_prozent=?, netto_gesamt=?, ust_gesamt=?, brutto_gesamt=?, notizen=?, geaendert_von=?
                 WHERE id=?");
             $stmt->execute([
-                $kundeId ?: null, $data['datum'], $leistungsdatum ?: null, $gueltigBis ?: null,
+                $kundeId ?: null, $firmenprofilId ?: null, $data['datum'], $leistungsdatum ?: null, $gueltigBis ?: null,
                 $faelligAm ?: null, $betreff ?: null, $einleitungstext ?: null, $schlusstext ?: null,
                 $gesamtrabattProzent, $nettoGesamt, $ustGesamt, $bruttoGesamt,
                 $notizen ?: null, $benutzer_id, $verkaufsdokumentId
@@ -569,11 +672,11 @@ function saveVerkaufsdokument($data, $positionenInput) {
             $db->prepare("DELETE FROM verkaufsdokument_positionen WHERE verkaufsdokument_id = ?")->execute([$verkaufsdokumentId]);
         } else {
             $stmt = $db->prepare("INSERT INTO verkaufsdokumente
-                (typ, status, kunde_id, vorgaenger_id, datum, leistungsdatum, gueltig_bis, faellig_am, betreff, einleitungstext, schlusstext,
+                (typ, status, kunde_id, firmenprofil_id, vorgaenger_id, datum, leistungsdatum, gueltig_bis, faellig_am, betreff, einleitungstext, schlusstext,
                  gesamtrabatt_prozent, netto_gesamt, ust_gesamt, brutto_gesamt, notizen, erstellt_von)
-                VALUES (?, 'entwurf', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                VALUES (?, 'entwurf', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([
-                $data['typ'], $kundeId ?: null, $vorgaengerId ?: null, $data['datum'],
+                $data['typ'], $kundeId ?: null, $firmenprofilId ?: null, $vorgaengerId ?: null, $data['datum'],
                 $leistungsdatum ?: null, $gueltigBis ?: null, $faelligAm ?: null,
                 $betreff ?: null, $einleitungstext ?: null, $schlusstext ?: null,
                 $gesamtrabattProzent, $nettoGesamt, $ustGesamt, $bruttoGesamt,
@@ -647,11 +750,11 @@ function umwandelnVerkaufsdokument($id, $neuerTyp) {
         $db->beginTransaction();
 
         $stmt = $db->prepare("INSERT INTO verkaufsdokumente
-            (typ, status, kunde_id, vorgaenger_id, datum, leistungsdatum, faellig_am, betreff, einleitungstext, schlusstext,
+            (typ, status, kunde_id, firmenprofil_id, vorgaenger_id, datum, leistungsdatum, faellig_am, betreff, einleitungstext, schlusstext,
              gesamtrabatt_prozent, netto_gesamt, ust_gesamt, brutto_gesamt, notizen, erstellt_von)
-            VALUES (?, 'entwurf', ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            VALUES (?, 'entwurf', ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([
-            $neuerTyp, $doc['kunde_id'], $id, $doc['leistungsdatum'], $doc['faellig_am'],
+            $neuerTyp, $doc['kunde_id'], $doc['firmenprofil_id'], $id, $doc['leistungsdatum'], $doc['faellig_am'],
             $doc['betreff'], $doc['einleitungstext'], $doc['schlusstext'],
             $doc['gesamtrabatt_prozent'], $doc['netto_gesamt'], $doc['ust_gesamt'], $doc['brutto_gesamt'], $doc['notizen'], $benutzer_id
         ]);
@@ -971,11 +1074,11 @@ function storniereVerkaufsrechnung($verkaufsdokumentId) {
         $db->beginTransaction();
 
         $stmt = $db->prepare("INSERT INTO verkaufsdokumente
-            (typ, status, kunde_id, storno_von_id, datum, leistungsdatum, betreff,
+            (typ, status, kunde_id, firmenprofil_id, storno_von_id, datum, leistungsdatum, betreff,
              gesamtrabatt_prozent, netto_gesamt, ust_gesamt, brutto_gesamt, erstellt_von)
-            VALUES ('rechnung', 'entwurf', ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?)");
+            VALUES ('rechnung', 'entwurf', ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([
-            $doc['kunde_id'], $verkaufsdokumentId, $doc['leistungsdatum'],
+            $doc['kunde_id'], $doc['firmenprofil_id'], $verkaufsdokumentId, $doc['leistungsdatum'],
             'Storno zu ' . $doc['nummer'], $doc['gesamtrabatt_prozent'],
             -$doc['netto_gesamt'], -$doc['ust_gesamt'], -$doc['brutto_gesamt'],
             $benutzer_id

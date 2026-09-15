@@ -130,6 +130,28 @@ function baueDokumentPlatzhalter($doc, $positionen, $firma) {
     $typLabel = $typLabels[$doc['typ']] ?? ucfirst($doc['typ']);
     $zeigePreise = $doc['typ'] !== 'lieferschein';
 
+    // Firmenprofil (Name+Logo+2 Hauptfarben) des Dokuments überschreibt das Standard-Profil -
+    // Adresse/UID/IBAN/Bank bleiben immer die der einzigen (steuerlich relevanten) Firma, siehe
+    // getAlleFirmenprofile() in includes/verkauf_functions.php.
+    if (!empty($doc['firmenprofil_id'])) {
+        $profil = getFirmenprofil($doc['firmenprofil_id']);
+        if ($profil && $profil['aktiv']) {
+            $firma['name'] = $profil['name'];
+            $firma['logo_data'] = $profil['logo_data'];
+            $firma['logo_mime'] = $profil['logo_mime'];
+            $firma['farbe1'] = $profil['farbe1'];
+            $firma['farbe2'] = $profil['farbe2'];
+        }
+    }
+    // Ohne zugeordnetes Profil (z.B. ältere Dokumente von vor Einführung der Firmenprofile)
+    // liefert das Standard-Profil die Farben, sonst feste Fallback-Werte, damit
+    // {{firma_farbe1}}/{{firma_farbe2}} immer einen gültigen Hex-Wert enthalten.
+    if (empty($firma['farbe1']) || empty($firma['farbe2'])) {
+        $standardProfil = getStandardFirmenprofil();
+        $firma['farbe1'] = $firma['farbe1'] ?? $standardProfil['farbe1'] ?? '#0d6efd';
+        $firma['farbe2'] = $firma['farbe2'] ?? $standardProfil['farbe2'] ?? '#6c757d';
+    }
+
     $firmaAdresse = trim(($firma['strasse'] ?? '') . ', ' . ($firma['plz'] ?? '') . ' ' . ($firma['ort'] ?? ''), ' ,');
 
     $kundeName = kundenAnzeigename($doc);
@@ -230,6 +252,8 @@ function baueDokumentPlatzhalter($doc, $positionen, $firma) {
         '{{firma_iban}}' => htmlspecialchars($firma['iban'] ?? ''),
         '{{firma_bic}}' => htmlspecialchars($firma['bic'] ?? ''),
         '{{firma_bank}}' => htmlspecialchars($firma['bank'] ?? ''),
+        '{{firma_farbe1}}' => htmlspecialchars($firma['farbe1'] ?? '#0d6efd'),
+        '{{firma_farbe2}}' => htmlspecialchars($firma['farbe2'] ?? '#6c757d'),
         '{{dokument_typ_label}}' => $typLabel,
         '{{nummer}}' => htmlspecialchars($doc['nummer'] ?: '(Entwurf)'),
         '{{status}}' => htmlspecialchars($doc['status']),

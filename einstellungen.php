@@ -91,7 +91,62 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: einstellungen.php?tab=firma');
         exit;
     }
-    
+
+    // Firmenprofil speichern (Marken-Name+Logo, z.B. für einen zweiten Firmenzweig)
+    if (isset($_POST['save_firmenprofil'])) {
+        $name = trim($_POST['name'] ?? '');
+        if ($name === '') {
+            setFlashMessage('danger', 'Bitte einen Namen für das Firmenprofil angeben.');
+            header('Location: einstellungen.php?tab=firmenprofile');
+            exit;
+        }
+
+        $logoUpload = null;
+        $logoMime = null;
+        if (!empty($_FILES['logo']['tmp_name']) && $_FILES['logo']['error'] === UPLOAD_ERR_OK) {
+            $erlaubteMimes = ['image/png', 'image/jpeg', 'image/gif'];
+            $maxBytes = 2 * 1024 * 1024;
+            $bildinfo = @getimagesize($_FILES['logo']['tmp_name']);
+
+            if ($_FILES['logo']['size'] > $maxBytes) {
+                setFlashMessage('danger', 'Logo ist zu groß (max. 2 MB).');
+                header('Location: einstellungen.php?tab=firmenprofile' . (!empty($_POST['id']) ? '&action=edit&id=' . (int)$_POST['id'] : '&action=new'));
+                exit;
+            }
+            if (!$bildinfo || !in_array($bildinfo['mime'], $erlaubteMimes, true)) {
+                setFlashMessage('danger', 'Logo muss ein PNG-, JPEG- oder GIF-Bild sein.');
+                header('Location: einstellungen.php?tab=firmenprofile' . (!empty($_POST['id']) ? '&action=edit&id=' . (int)$_POST['id'] : '&action=new'));
+                exit;
+            }
+
+            $logoUpload = file_get_contents($_FILES['logo']['tmp_name']);
+            $logoMime = $bildinfo['mime'];
+        }
+
+        saveFirmenprofil([
+            'id' => $_POST['id'] ?: null,
+            'name' => $name,
+            'logo_upload' => $logoUpload,
+            'logo_mime' => $logoMime,
+            'logo_entfernen' => !empty($_POST['logo_entfernen']),
+            'farbe1' => $_POST['farbe1'] ?? null,
+            'farbe2' => $_POST['farbe2'] ?? null,
+            'ist_standard' => isset($_POST['ist_standard']) ? 1 : 0,
+            'aktiv' => isset($_POST['aktiv']) ? 1 : 0,
+        ]);
+        setFlashMessage('success', 'Firmenprofil gespeichert.');
+        header('Location: einstellungen.php?tab=firmenprofile');
+        exit;
+    }
+
+    // Firmenprofil löschen
+    if (isset($_POST['delete_firmenprofil'])) {
+        $result = deleteFirmenprofil((int)$_POST['id']);
+        setFlashMessage($result['success'] ? 'success' : 'danger', $result['success'] ? 'Firmenprofil gelöscht.' : $result['message']);
+        header('Location: einstellungen.php?tab=firmenprofile');
+        exit;
+    }
+
     // USt-Satz speichern
     if (isset($_POST['save_ust'])) {
         $id = $_POST['id'] ?? null;
@@ -394,10 +449,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 $firma = $db->query("SELECT * FROM firma LIMIT 1")->fetch();
 $ustSaetze = $db->query("SELECT * FROM ust_saetze ORDER BY satz DESC")->fetchAll();
 $kategorien = $db->query("SELECT * FROM kategorien ORDER BY typ, name")->fetchAll();
+$firmenprofile = $tab === 'firmenprofile' ? getAlleFirmenprofile(false) : [];
 
 // Einzeldaten für Edit
 $ustSatz = null;
 $kategorie = null;
+$firmenprofil = ($id && $tab === 'firmenprofile') ? getFirmenprofil((int)$id) : null;
 if ($id && $tab === 'ust') {
     $stmt = $db->prepare("SELECT * FROM ust_saetze WHERE id = ?");
     $stmt->execute([$id]);
@@ -473,6 +530,11 @@ $e1aKennzahlen = [
                     <li class="nav-item">
                         <a class="nav-link <?= $tab === 'firma' ? 'active' : '' ?>" href="?tab=firma">
                             <i class="bi bi-building me-1"></i>Firma
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $tab === 'firmenprofile' ? 'active' : '' ?>" href="?tab=firmenprofile">
+                            <i class="bi bi-buildings me-1"></i>Firmenprofile
                         </a>
                     </li>
                     <li class="nav-item">
@@ -653,6 +715,103 @@ $e1aKennzahlen = [
                         <i class="bi bi-check-lg me-2"></i>Firmendaten speichern
                     </button>
                 </form>
+
+                <?php elseif ($tab === 'firmenprofile'): ?>
+                <!-- FIRMENPROFILE (Marken-Name+Logo pro Firmenzweig, auswählbar bei Angebot/Auftrag/Rechnung) -->
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Name, Logo und zwei Hauptfarben unterscheiden sich pro Profil - Adresse, UID, IBAN und Bankverbindung
+                    kommen weiterhin einheitlich aus dem Tab "Firma", da es sich steuerlich um dieselbe Firma handelt.
+                    Die Farben stehen in den PDF-Vorlagen (Tab "PDF-Design") als <code>{{firma_farbe1}}</code> und
+                    <code>{{firma_farbe2}}</code> zur Verfügung.
+                </div>
+                <?php if ($action === 'edit' || $action === 'new'): ?>
+                <div class="card">
+                    <div class="card-header"><?= $action === 'new' ? 'Neues Firmenprofil' : 'Firmenprofil bearbeiten' ?></div>
+                    <div class="card-body">
+                        <form method="POST" enctype="multipart/form-data">
+                            <input type="hidden" name="id" value="<?= $firmenprofil['id'] ?? '' ?>">
+                            <div class="row mb-3">
+                                <div class="col-md-8">
+                                    <label class="form-label required">Name</label>
+                                    <input type="text" class="form-control" name="name" value="<?= htmlspecialchars($firmenprofil['name'] ?? '') ?>" required>
+                                </div>
+                                <div class="col-md-4">
+                                    <div class="form-check mt-4">
+                                        <input type="checkbox" class="form-check-input" name="aktiv" id="fp_aktiv" <?= ($firmenprofil['aktiv'] ?? 1) ? 'checked' : '' ?>>
+                                        <label class="form-check-label" for="fp_aktiv">Aktiv</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Logo</label>
+                                <?php if (!empty($firmenprofil['logo_data'])): ?>
+                                <div class="mb-2">
+                                    <img src="data:<?= htmlspecialchars($firmenprofil['logo_mime']) ?>;base64,<?= $firmenprofil['logo_data'] ?>" style="max-height: 60px;" alt="Aktuelles Logo">
+                                    <div class="form-check mt-1">
+                                        <input type="checkbox" class="form-check-input" name="logo_entfernen" id="fp_logo_entfernen">
+                                        <label class="form-check-label" for="fp_logo_entfernen">Logo entfernen</label>
+                                    </div>
+                                </div>
+                                <?php endif; ?>
+                                <input type="file" class="form-control" name="logo" accept="image/png,image/jpeg,image/gif">
+                                <div class="form-text">PNG, JPEG oder GIF, max. 2 MB. Wird als Base64-Data-URI in den PDF-Vorlagen eingebettet.</div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-4">
+                                    <label class="form-label">Hauptfarbe 1</label>
+                                    <input type="color" class="form-control form-control-color" name="farbe1" value="<?= htmlspecialchars($firmenprofil['farbe1'] ?? '#0d6efd') ?>" title="Hauptfarbe 1">
+                                    <div class="form-text">Platzhalter <code>{{firma_farbe1}}</code></div>
+                                </div>
+                                <div class="col-md-4">
+                                    <label class="form-label">Hauptfarbe 2</label>
+                                    <input type="color" class="form-control form-control-color" name="farbe2" value="<?= htmlspecialchars($firmenprofil['farbe2'] ?? '#6c757d') ?>" title="Hauptfarbe 2">
+                                    <div class="form-text">Platzhalter <code>{{firma_farbe2}}</code></div>
+                                </div>
+                            </div>
+                            <div class="form-check mb-3">
+                                <input type="checkbox" class="form-check-input" name="ist_standard" id="fp_ist_standard" <?= ($firmenprofil['ist_standard'] ?? 0) ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="fp_ist_standard">Als Standard verwenden (Vorauswahl bei neuen Dokumenten)</label>
+                            </div>
+                            <button type="submit" name="save_firmenprofil" class="btn btn-success">Speichern</button>
+                            <a href="?tab=firmenprofile" class="btn btn-secondary">Abbrechen</a>
+                        </form>
+                    </div>
+                </div>
+                <?php else: ?>
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between">
+                        <span><i class="bi bi-buildings me-2"></i>Firmenprofile</span>
+                        <a href="?tab=firmenprofile&action=new" class="btn btn-light btn-sm">+ Neu</a>
+                    </div>
+                    <table class="table table-hover mb-0">
+                        <thead><tr><th>Logo</th><th>Name</th><th>Farben</th><th class="text-center">Standard</th><th class="text-center">Status</th><th></th></tr></thead>
+                        <tbody>
+                        <?php if (empty($firmenprofile)): ?>
+                        <tr><td colspan="6" class="text-center text-muted py-3">Keine Firmenprofile vorhanden</td></tr>
+                        <?php else: foreach ($firmenprofile as $profil): ?>
+                        <tr class="<?= !$profil['aktiv'] ? 'table-secondary' : '' ?>">
+                            <td><?php if (!empty($profil['logo_data'])): ?><img src="data:<?= htmlspecialchars($profil['logo_mime']) ?>;base64,<?= $profil['logo_data'] ?>" style="max-height: 32px;" alt=""><?php else: ?><span class="text-muted">-</span><?php endif; ?></td>
+                            <td><?= htmlspecialchars($profil['name']) ?></td>
+                            <td>
+                                <span class="d-inline-block rounded-circle border" style="width:18px;height:18px;background:<?= htmlspecialchars($profil['farbe1'] ?? '#0d6efd') ?>;" title="Hauptfarbe 1"></span>
+                                <span class="d-inline-block rounded-circle border" style="width:18px;height:18px;background:<?= htmlspecialchars($profil['farbe2'] ?? '#6c757d') ?>;" title="Hauptfarbe 2"></span>
+                            </td>
+                            <td class="text-center"><?php if ($profil['ist_standard']): ?><span class="badge bg-primary">Standard</span><?php endif; ?></td>
+                            <td class="text-center"><span class="badge bg-<?= $profil['aktiv'] ? 'success' : 'secondary' ?>"><?= $profil['aktiv'] ? 'Aktiv' : 'Inaktiv' ?></span></td>
+                            <td class="text-end">
+                                <a href="?tab=firmenprofile&action=edit&id=<?= $profil['id'] ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Firmenprofil wirklich löschen?')">
+                                    <input type="hidden" name="id" value="<?= $profil['id'] ?>">
+                                    <button name="delete_firmenprofil" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                        <?php endforeach; endif; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <?php endif; ?>
 
                 <?php elseif ($tab === 'ust'): ?>
                 <!-- UST-SÄTZE -->
@@ -1005,6 +1164,7 @@ $e1aKennzahlen = [
                                         <tr><td><code>{{firma_adresse}}</code></td><td class="small">Straße, PLZ Ort</td></tr>
                                         <tr><td><code>{{firma_uid}}</code></td><td class="small">UID-Nummer</td></tr>
                                         <tr><td><code>{{firma_iban}}</code>, <code>{{firma_bic}}</code>, <code>{{firma_bank}}</code></td><td class="small">Bankdaten</td></tr>
+                                        <tr><td><code>{{firma_farbe1}}</code>, <code>{{firma_farbe2}}</code></td><td class="small">Hauptfarben des gewählten Firmenprofils (Hex, z.B. für <code>style="color: {{firma_farbe1}}"</code>)</td></tr>
                                         <tr><td><code>{{dokument_typ_label}}</code></td><td class="small">"Angebot" / "Auftragsbestätigung" / "Rechnung"</td></tr>
                                         <tr><td><code>{{nummer}}</code>, <code>{{status}}</code></td><td class="small">z.B. "RE-2026-0003", "entwurf"</td></tr>
                                         <tr><td><code>{{datum}}</code>, <code>{{leistungsdatum}}</code>, <code>{{gueltig_bis}}</code>, <code>{{faellig_am}}</code></td><td class="small">Formatierte Daten</td></tr>

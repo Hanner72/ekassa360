@@ -25,6 +25,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'id' => $_POST['id'] ?: null,
             'typ' => $TYP,
             'kunde_id' => $_POST['kunde_id'] ?: null,
+            'firmenprofil_id' => $_POST['firmenprofil_id'] ?: null,
             'datum' => $_POST['datum'],
             'gueltig_bis' => $_POST['gueltig_bis'] ?: null,
             'betreff' => trim($_POST['betreff'] ?? ''),
@@ -112,6 +113,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 }
 
 $kunden = getAlleKunden(true);
+$firmenprofile = getAlleFirmenprofile(true);
 $artikelListe = getAlleArtikel(true);
 $ustSaetze = getUstSaetze();
 $emailSignaturen = getAlleEmailSignaturen();
@@ -185,6 +187,23 @@ $pageTitle = 'Angebote';
                                     <input type="date" class="form-control" name="gueltig_bis" value="<?= $dokument['gueltig_bis'] ?? date('Y-m-d', strtotime('+30 days')) ?>">
                                 </div>
                             </div>
+                            <?php if (count($firmenprofile) > 1): ?>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Firmenprofil</label>
+                                    <select class="form-select" name="firmenprofil_id">
+                                        <?php
+                                        $aktuellesProfil = $dokument['firmenprofil_id'] ?? (getStandardFirmenprofil()['id'] ?? null);
+                                        foreach ($firmenprofile as $fp):
+                                        ?>
+                                        <option value="<?= $fp['id'] ?>" <?= $aktuellesProfil == $fp['id'] ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($fp['name']) ?><?= $fp['ist_standard'] ? ' (Standard)' : '' ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
+                            </div>
+                            <?php endif; ?>
                             <div class="mb-3">
                                 <label class="form-label">Betreff</label>
                                 <input type="text" class="form-control" name="betreff" value="<?= htmlspecialchars($dokument['betreff'] ?? '') ?>">

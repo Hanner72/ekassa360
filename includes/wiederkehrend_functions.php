@@ -101,6 +101,7 @@ function verarbeiteWiederkehrendeRegel($regel) {
         $neueDaten = [
             'typ' => 'rechnung',
             'kunde_id' => $regel['kunde_id'] ?: $vorlage['kunde_id'],
+            'firmenprofil_id' => $vorlage['firmenprofil_id'],
             'datum' => $heute,
             'leistungsdatum' => $vorlage['leistungsdatum'],
             'faellig_am' => null,
