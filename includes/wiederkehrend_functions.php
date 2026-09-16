@@ -38,6 +38,48 @@ function berechneNaechstesDatum($datum, $rhythmus) {
 }
 
 /**
+ * Steuert, OB und WANN der Cron-Job (cron/generate_wiederkehrende_rechnungen.php) tatsächlich
+ * Rechnungen erzeugt - der Server-Crontab selbst läuft fix und häufig (z.B. alle 15 Minuten),
+ * die eigentliche Zeitsteuerung passiert hier, damit sie in den Einstellungen änderbar ist.
+ */
+function getAutomatisierungEinstellungen() {
+    $db = db();
+    $row = $db->query("SELECT * FROM automatisierung_einstellungen WHERE id = 1")->fetch();
+    return $row ?: ['id' => 1, 'wiederkehrend_aktiv' => 1, 'wiederkehrend_uhrzeit' => '03:00:00', 'wiederkehrend_zuletzt_ausgefuehrt' => null];
+}
+
+function saveAutomatisierungEinstellungen($aktiv, $uhrzeit) {
+    $db = db();
+    $stmt = $db->prepare("UPDATE automatisierung_einstellungen SET wiederkehrend_aktiv = ?, wiederkehrend_uhrzeit = ? WHERE id = 1");
+    $stmt->execute([$aktiv ? 1 : 0, $uhrzeit]);
+}
+
+/**
+ * Für den Cron-Job: true, wenn JETZT tatsächlich generiert werden soll (aktiv, konfigurierte
+ * Uhrzeit erreicht, heute noch nicht gelaufen). Bei true wird `wiederkehrend_zuletzt_ausgefuehrt`
+ * sofort auf heute gesetzt (nicht erst nach der Generierung) - ein alle 15 Minuten laufender
+ * Crontab darf sonst bei einem langsamen/hängenden Lauf mehrfach am selben Tag auslösen.
+ */
+function sollWiederkehrendeAutomatischLaufen() {
+    $einstellungen = getAutomatisierungEinstellungen();
+    if (!$einstellungen['wiederkehrend_aktiv']) {
+        return false;
+    }
+    $heute = date('Y-m-d');
+    if ($einstellungen['wiederkehrend_zuletzt_ausgefuehrt'] === $heute) {
+        return false;
+    }
+    if (date('H:i:s') < $einstellungen['wiederkehrend_uhrzeit']) {
+        return false;
+    }
+
+    $db = db();
+    $stmt = $db->prepare("UPDATE automatisierung_einstellungen SET wiederkehrend_zuletzt_ausgefuehrt = ? WHERE id = 1");
+    $stmt->execute([$heute]);
+    return true;
+}
+
+/**
  * Alle fälligen Regeln verarbeiten (aktiv=1, naechstes_datum <= heute).
  * $nurId: optional auf eine einzelne Regel einschränken (manueller Button).
  */

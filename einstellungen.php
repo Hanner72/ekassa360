@@ -10,6 +10,7 @@ require_once 'includes/auth.php';
 require_once 'includes/verkauf_functions.php';
 require_once 'includes/verkauf_pdf.php';
 require_once 'includes/mail.php';
+require_once 'includes/wiederkehrend_functions.php';
 
 requireLogin();
 
@@ -443,6 +444,17 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: einstellungen.php?tab=wartung');
         exit;
     }
+
+    // Automatische wiederkehrende Rechnungen (Zeitsteuerung für cron/generate_wiederkehrende_rechnungen.php)
+    if (isset($_POST['save_automatisierung_einstellungen'])) {
+        saveAutomatisierungEinstellungen(
+            isset($_POST['wiederkehrend_aktiv']),
+            $_POST['wiederkehrend_uhrzeit'] ?: '03:00'
+        );
+        setFlashMessage('success', 'Automatisierungs-Einstellungen gespeichert.');
+        header('Location: einstellungen.php?tab=wartung');
+        exit;
+    }
 }
 
 // Daten laden
@@ -450,6 +462,7 @@ $firma = $db->query("SELECT * FROM firma LIMIT 1")->fetch();
 $ustSaetze = $db->query("SELECT * FROM ust_saetze ORDER BY satz DESC")->fetchAll();
 $kategorien = $db->query("SELECT * FROM kategorien ORDER BY typ, name")->fetchAll();
 $firmenprofile = $tab === 'firmenprofile' ? getAlleFirmenprofile(false) : [];
+$automatisierung = $tab === 'wartung' ? getAutomatisierungEinstellungen() : [];
 
 // Einzeldaten für Edit
 $ustSatz = null;
@@ -1443,7 +1456,49 @@ $e1aKennzahlen = [
                         </div>
                     </div>
                 </div>
-                
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-clock-history me-2"></i>Automatische wiederkehrende Rechnungen
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">
+                            Der Server prüft im Hintergrund alle 15 Minuten, ob wiederkehrende Rechnungen fällig sind.
+                            Hier stellst du ein, <strong>ob</strong> und zu welcher <strong>Uhrzeit</strong> das tatsächlich passieren soll -
+                            eine Änderung wird sofort wirksam, ohne dass am Server etwas eingerichtet werden muss.
+                        </p>
+                        <form method="POST" class="row g-3 align-items-end">
+                            <div class="col-auto">
+                                <div class="form-check form-switch mt-4">
+                                    <input type="checkbox" class="form-check-input" role="switch" name="wiederkehrend_aktiv" id="wk_aktiv" <?= !empty($automatisierung['wiederkehrend_aktiv']) ? 'checked' : '' ?>>
+                                    <label class="form-check-label" for="wk_aktiv">Aktiv</label>
+                                </div>
+                            </div>
+                            <div class="col-auto">
+                                <label class="form-label" for="wk_uhrzeit">Uhrzeit</label>
+                                <input type="time" class="form-control" name="wiederkehrend_uhrzeit" id="wk_uhrzeit" value="<?= htmlspecialchars(substr($automatisierung['wiederkehrend_uhrzeit'] ?? '03:00:00', 0, 5)) ?>">
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" name="save_automatisierung_einstellungen" class="btn btn-primary">
+                                    <i class="bi bi-save me-1"></i>Speichern
+                                </button>
+                            </div>
+                            <div class="col-auto">
+                                <span class="text-muted small">
+                                    Zuletzt ausgeführt:
+                                    <?= !empty($automatisierung['wiederkehrend_zuletzt_ausgefuehrt']) ? formatDatum($automatisierung['wiederkehrend_zuletzt_ausgefuehrt']) : 'noch nie' ?>
+                                </span>
+                            </div>
+                        </form>
+                        <details class="mt-3">
+                            <summary class="text-muted" style="cursor: pointer;">Einmalige Server-Einrichtung (nur beim ersten Mal nötig)</summary>
+                            <p class="mt-2 mb-1">Per SSH auf dem Server, einmalig <code>crontab -e</code> und diese Zeile einfügen:</p>
+                            <pre class="bg-light p-2 small">*/15 * * * * php /pfad/zu/ekassa360/cron/generate_wiederkehrende_rechnungen.php >> /var/log/ekassa360_cron.log 2>&amp;1</pre>
+                            <p class="mb-0 text-muted small">Danach nie wieder anfassen - Aktiv/Uhrzeit oben steuern von da an alles.</p>
+                        </details>
+                    </div>
+                </div>
+
                 <div class="card">
                     <div class="card-header">
                         <i class="bi bi-info-circle me-2"></i>System-Informationen
