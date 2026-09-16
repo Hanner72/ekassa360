@@ -20,6 +20,41 @@
  * `migrationen` eintragen.
  */
 
+/**
+ * Feste, per Hand anhand der tatsächlichen SQL-Abhängigkeiten (Fremdschlüssel, Spalten, die
+ * eine spätere Datei voraussetzt, ENUM-Redefinitionen die Daten aus einer früheren Datei
+ * überschreiben würden) geprüfte Ausführungsreihenfolge - siehe Kommentar in
+ * fuehreAusstehendeMigrationenAus(). Bei einer neuen Migration: Dateinamen hier ergänzen, an
+ * der durch ihre Abhängigkeiten vorgegebenen Stelle (i.d.R. ans Ende).
+ */
+// Geheimes Token, um sich bei einem fehlgeschlagenen Migrations-Update den echten
+// Fehlertext anzeigen zu lassen (siehe migrationFehlerAnzeigen()), wenn kein Zugriff auf das
+// Server-Error-Log besteht. Aufruf z.B.: https://DEINE-DOMAIN/index.php?migration_debug=ekassa360-diag-7f3a2c
+// Ohne dieses Token sehen normale Besucher weiterhin nur die harmlose Wartungsmeldung.
+const MIGRATION_DEBUG_TOKEN = 'ekassa360-diag-7f3a2c';
+
+const MIGRATIONS_REIHENFOLGE = [
+    'add_verkauf_module.sql',                  // legt kunden/artikel/nummernkreise/verkaufsdokumente an
+    'add_firma_logo.sql',                      // firma.logo_data/logo_mime (Basis für add_firmenprofile.sql)
+    'add_nummernkreis_format.sql',             // nummernkreise.format (Basis für add_kunden_nummernkreis.sql)
+    'add_kunden_nummernkreis.sql',             // braucht .format-Spalte
+    'add_paperless_columns.sql',               // braucht verkaufsdokumente
+    'add_wiederkehrende_rechnungen.sql',       // braucht kunden + verkaufsdokumente
+    'add_gesamtrabatt.sql',                    // braucht verkaufsdokumente
+    'add_email_versand.sql',                   // braucht verkaufsdokumente
+    'add_email_vorlagen.sql',
+    'add_pdf_vorlagen.sql',                    // Basis für add_lieferschein_vorlage.sql
+    'add_lieferschein_vorlage.sql',            // braucht pdf_vorlagen
+    'add_artikel_kategorie_nummernkreis.sql',  // fügt kategorien.kurzbezeichnung hinzu (Basis für add_artikelgruppen.sql)
+    'add_artikelgruppen.sql',                  // entfernt kategorien.kurzbezeichnung wieder, braucht artikel-Tabelle
+    'add_artikeluntergruppen.sql',             // braucht artikelgruppen
+    'add_artikelnummer_pro_untergruppe.sql',   // braucht artikelgruppen + artikeluntergruppen
+    'add_angebot_status_erweiterung.sql',      // muss vor auftrag laufen (ENUM-Redefinition würde sonst Daten kappen)
+    'add_auftrag_status_erweiterung.sql',
+    'add_firmenprofile.sql',                   // braucht verkaufsdokumente + firma.logo_data/logo_mime
+    'add_firmenprofil_farben.sql',             // braucht firmenprofile
+];
+
 function fuehreAusstehendeMigrationenAus() {
     $db = db();
 
@@ -34,10 +69,35 @@ function fuehreAusstehendeMigrationenAus() {
         return;
     }
 
-    // Nach Änderungsdatum sortieren - entspricht der tatsächlichen Erstellungsreihenfolge
-    // und damit der fachlich korrekten Abhängigkeits-Reihenfolge der Migrationen
-    // (z.B. muss die Tabelle einer Fremdschlüssel-Referenz zuerst angelegt werden).
-    usort($dateien, fn($a, $b) => filemtime($a) <=> filemtime($b));
+    // Reihenfolge NICHT über filemtime() bestimmen: ein reiner Datei-Push (FTP/SFTP/Zip)
+    // setzt Änderungsdaten oft auf den Upload-Zeitpunkt und nicht die ursprüngliche
+    // Erstellungsreihenfolge - dann kippt die Sortierung faktisch auf alphabetisch (glob()
+    // liefert ohne GLOB_NOSORT bereits alphabetisch sortierte Treffer, PHPs usort() ist seit
+    // 8.0 stabil, gleiche mtimes fallen also auf diese Reihenfolge zurück). Rein alphabetisch
+    // verletzt mehrere echte Abhängigkeiten, z.B. add_kunden_nummernkreis.sql (braucht die
+    // `format`-Spalte) vs. add_nummernkreis_format.sql (legt sie an), oder
+    // add_firmenprofil_farben.sql vs. add_firmenprofile.sql. Deshalb eine feste, anhand der
+    // tatsächlichen FREMDSCHLÜSSEL-/Spalten-Abhängigkeiten geprüfte Reihenfolge: siehe
+    // MIGRATIONS_REIHENFOLGE unten. Neue Dateien MÜSSEN dort ergänzt werden (ans Ende, oder an
+    // die durch ihre Abhängigkeiten vorgegebene Stelle) - unbekannte Dateien landen sonst nach
+    // allen bekannten (alphabetisch untereinander sortiert) und werden nur per error_log()
+    // markiert, damit ein vergessener Eintrag aus früherer Situation nicht sofort staut.
+    $reihenfolge = array_flip(MIGRATIONS_REIHENFOLGE);
+    usort($dateien, function ($a, $b) use ($reihenfolge) {
+        $na = basename($a);
+        $nb = basename($b);
+        $pa = $reihenfolge[$na] ?? PHP_INT_MAX;
+        $pb = $reihenfolge[$nb] ?? PHP_INT_MAX;
+        if ($pa === PHP_INT_MAX && $pb === PHP_INT_MAX) {
+            return $na <=> $nb;
+        }
+        return $pa <=> $pb;
+    });
+    foreach ($dateien as $pfad) {
+        if (!isset($reihenfolge[basename($pfad)])) {
+            error_log("Migration '" . basename($pfad) . "' fehlt in MIGRATIONS_REIHENFOLGE (includes/migrations.php) - wird zuletzt einsortiert.");
+        }
+    }
 
     $bereitsAngewendet = array_flip(migrationsListeLaden($db));
 
@@ -130,6 +190,12 @@ function fuehreSqlDateiAus($db, $pfad) {
  * unvollständigen Datenbank weiterladen zu lassen (Folgefehler wären für den Besucher
  * verwirrender als eine klare Wartungsmeldung). Bei CLI-Aufrufen (z.B. Cron) stattdessen
  * eine Fehlermeldung auf STDERR.
+ *
+ * Normale Besucher sehen nur die generische Meldung (der Fehlertext könnte Tabellen-/
+ * Spaltennamen oder in seltenen Fällen sogar Datenwerte enthalten). Mit dem korrekten
+ * MIGRATION_DEBUG_TOKEN als ?migration_debug=... Parameter wird zusätzlich der echte
+ * Dateiname + die Exception-Meldung angezeigt - gedacht als kurzfristige Diagnosehilfe ohne
+ * Zugriff auf das Server-Error-Log.
  */
 function migrationFehlerAnzeigen($dateiname, $meldung) {
     if (php_sapi_name() === 'cli') {
@@ -139,9 +205,21 @@ function migrationFehlerAnzeigen($dateiname, $meldung) {
 
     http_response_code(503);
     header('Retry-After: 60');
+
+    $debugErlaubt = isset($_GET['migration_debug'])
+        && hash_equals(MIGRATION_DEBUG_TOKEN, (string)$_GET['migration_debug']);
+
+    $detail = '';
+    if ($debugErlaubt) {
+        $detail = '<pre style="text-align: left; background: #f4f4f4; border: 1px solid #ccc; padding: 1rem; overflow-x: auto; white-space: pre-wrap;">'
+            . htmlspecialchars($dateiname) . "\n\n" . htmlspecialchars($meldung)
+            . '</pre>';
+    }
+
     echo '<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Wartungsarbeiten</title></head><body style="font-family: sans-serif; max-width: 40rem; margin: 4rem auto; text-align: center;">'
         . '<h1>Wartungsarbeiten</h1>'
         . '<p>Ein automatisches Datenbank-Update ist fehlgeschlagen. Bitte in Kürze erneut versuchen.</p>'
+        . $detail
         . '</body></html>';
     exit;
 }
