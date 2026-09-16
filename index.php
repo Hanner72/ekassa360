@@ -6,6 +6,7 @@ session_start();
 require_once 'config/database.php';
 require_once 'includes/functions.php';
 require_once 'includes/auth.php';
+require_once 'includes/verkauf_functions.php';
 
 requireLogin();
 
@@ -15,7 +16,7 @@ $currentMonth = date('n');
 // Statistiken laden
 $stats = getStatistics($currentYear);
 $recentInvoices = getRecentInvoices(5);
-$openInvoices = getOpenInvoices();
+$offeneVerkaufsrechnungen = getOffeneVerkaufsrechnungen(5);
 ?>
 <!DOCTYPE html>
 <html lang="de">
@@ -99,11 +100,12 @@ $openInvoices = getOpenInvoices();
                 </div>
 
                 <div class="row">
-                    <!-- Letzte Rechnungen -->
+                    <!-- Letzte Kassabuch-Einträge (Einnahmen/Ausgaben-Ledger, siehe rechnungen.php - nicht
+                         zu verwechseln mit den Verkaufsrechnungen des Verkauf-Moduls) -->
                     <div class="col-lg-8 mb-4">
-                        <div class="card">
+                        <div class="card mb-4">
                             <div class="card-header d-flex justify-content-between align-items-center">
-                                <h5 class="mb-0"><i class="bi bi-receipt me-2"></i>Letzte Rechnungen</h5>
+                                <h5 class="mb-0"><i class="bi bi-receipt me-2"></i>Letzte Kassabuch-Einträge</h5>
                                 <a href="rechnungen.php" class="btn btn-sm btn-outline-warning">Alle anzeigen</a>
                             </div>
                             <div class="card-body p-0">
@@ -122,7 +124,7 @@ $openInvoices = getOpenInvoices();
                                             <?php if (empty($recentInvoices)): ?>
                                             <tr>
                                                 <td colspan="5" class="text-center text-muted py-4">
-                                                    Noch keine Rechnungen vorhanden
+                                                    Noch keine Kassabuch-Einträge vorhanden
                                                 </td>
                                             </tr>
                                             <?php else: ?>
@@ -151,11 +153,67 @@ $openInvoices = getOpenInvoices();
                                 </div>
                             </div>
                         </div>
+
+                        <!-- Offene Verkaufsrechnungen (Kunden-Rechnungen des Verkauf-Moduls, nicht das
+                             Kassabuch) - finalisiert, aber noch nicht vollständig bezahlt. -->
+                        <div class="card">
+                            <div class="card-header d-flex justify-content-between align-items-center">
+                                <h5 class="mb-0"><i class="bi bi-exclamation-triangle me-2"></i>Offene Verkaufsrechnungen</h5>
+                                <a href="verkaufsrechnungen.php" class="btn btn-sm btn-outline-warning">Alle anzeigen</a>
+                            </div>
+                            <div class="card-body p-0">
+                                <div class="table-responsive">
+                                    <table class="table table-hover mb-0">
+                                        <thead class="table-light">
+                                            <tr>
+                                                <th>Nummer</th>
+                                                <th>Kunde</th>
+                                                <th>Rechnungsdatum</th>
+                                                <th>Fällig am</th>
+                                                <th class="text-end">Betrag</th>
+                                                <th></th>
+                                            </tr>
+                                        </thead>
+                                        <tbody>
+                                            <?php if (empty($offeneVerkaufsrechnungen)): ?>
+                                            <tr>
+                                                <td colspan="6" class="text-center text-muted py-4">
+                                                    Keine offenen Verkaufsrechnungen
+                                                </td>
+                                            </tr>
+                                            <?php else: ?>
+                                            <?php foreach ($offeneVerkaufsrechnungen as $vr):
+                                                $ueberfaellig = !empty($vr['faellig_am']) && $vr['faellig_am'] < date('Y-m-d');
+                                            ?>
+                                            <tr class="<?= $ueberfaellig ? 'table-danger' : '' ?>">
+                                                <td><?= htmlspecialchars($vr['nummer'] ?: '-') ?></td>
+                                                <td><?= htmlspecialchars(kundenAnzeigename($vr)) ?></td>
+                                                <td><?= date('d.m.Y', strtotime($vr['datum'])) ?></td>
+                                                <td>
+                                                    <?= !empty($vr['faellig_am']) ? date('d.m.Y', strtotime($vr['faellig_am'])) : '-' ?>
+                                                    <?php if ($ueberfaellig): ?>
+                                                        <span class="badge bg-danger ms-1">überfällig</span>
+                                                    <?php endif; ?>
+                                                </td>
+                                                <td class="text-end">€ <?= number_format($vr['brutto_gesamt'], 2, ',', '.') ?></td>
+                                                <td class="text-end">
+                                                    <a href="verkaufsrechnungen.php?action=view&id=<?= $vr['id'] ?>" class="btn btn-sm btn-outline-secondary" title="Ansehen">
+                                                        <i class="bi bi-eye"></i>
+                                                    </a>
+                                                </td>
+                                            </tr>
+                                            <?php endforeach; ?>
+                                            <?php endif; ?>
+                                        </tbody>
+                                    </table>
+                                </div>
+                            </div>
+                        </div>
                     </div>
 
-                    <!-- Schnellaktionen & Offene Rechnungen -->
+                    <!-- Schnellaktionen -->
                     <div class="col-lg-4 mb-4">
-                        <div class="card mb-4">
+                        <div class="card">
                             <div class="card-header">
                                 <h5 class="mb-0"><i class="bi bi-lightning-charge me-2"></i>Schnellaktionen</h5>
                             </div>
@@ -173,35 +231,20 @@ $openInvoices = getOpenInvoices();
                                     <a href="einkommensteuer.php" class="btn btn-outline-secondary">
                                         <i class="bi bi-file-earmark-ruled me-2"></i>Einkommensteuer (E1a)
                                     </a>
+                                    <hr class="my-1">
+                                    <a href="kunden.php" class="btn btn-outline-dark">
+                                        <i class="bi bi-person-plus me-2"></i>Neuer Kunde
+                                    </a>
+                                    <a href="angebote.php?action=new" class="btn btn-outline-dark">
+                                        <i class="bi bi-file-earmark-text me-2"></i>Neues Angebot
+                                    </a>
+                                    <a href="auftraege.php?action=new" class="btn btn-outline-dark">
+                                        <i class="bi bi-clipboard-check me-2"></i>Neuer Auftrag
+                                    </a>
+                                    <a href="verkaufsrechnungen.php?action=new" class="btn btn-outline-dark">
+                                        <i class="bi bi-receipt me-2"></i>Neue Rechnung
+                                    </a>
                                 </div>
-                            </div>
-                        </div>
-
-                        <div class="card">
-                            <div class="card-header d-flex justify-content-between align-items-center">
-                                <h5 class="mb-0"><i class="bi bi-exclamation-triangle me-2"></i>Offene Rechnungen</h5>
-                                <span class="badge bg-warning text-dark"><?= count($openInvoices) ?></span>
-                            </div>
-                            <div class="card-body p-0">
-                                <ul class="list-group list-group-flush">
-                                    <?php if (empty($openInvoices)): ?>
-                                    <li class="list-group-item text-center text-muted">
-                                        Keine offenen Rechnungen
-                                    </li>
-                                    <?php else: ?>
-                                    <?php foreach (array_slice($openInvoices, 0, 5) as $invoice): ?>
-                                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                                        <div>
-                                            <small class="text-muted"><?= date('d.m.Y', strtotime($invoice['datum'])) ?></small><br>
-                                            <?= htmlspecialchars($invoice['kunde_lieferant']) ?>
-                                        </div>
-                                        <span class="badge bg-<?= $invoice['typ'] == 'einnahme' ? 'success' : 'danger' ?>">
-                                            € <?= number_format($invoice['brutto_betrag'], 2, ',', '.') ?>
-                                        </span>
-                                    </li>
-                                    <?php endforeach; ?>
-                                    <?php endif; ?>
-                                </ul>
                             </div>
                         </div>
                     </div>

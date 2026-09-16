@@ -11,6 +11,7 @@ require_once 'includes/verkauf_functions.php';
 require_once 'includes/verkauf_pdf.php';
 require_once 'includes/mail.php';
 require_once 'includes/wiederkehrend_functions.php';
+require_once 'includes/bondrucker.php';
 
 requireLogin();
 
@@ -455,6 +456,29 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: einstellungen.php?tab=wartung');
         exit;
     }
+
+    // Netzwerk-Bondrucker (IP/Port/Papierbreite)
+    if (isset($_POST['save_bondrucker_einstellungen'])) {
+        saveBondruckerEinstellungen(
+            trim($_POST['bondrucker_ip'] ?? ''),
+            $_POST['bondrucker_port'] ?? 9100,
+            $_POST['bondrucker_papierbreite'] ?? '80mm'
+        );
+        setFlashMessage('success', 'Bondrucker-Einstellungen gespeichert.');
+        header('Location: einstellungen.php?tab=wartung');
+        exit;
+    }
+
+    if (isset($_POST['bondrucker_testdruck'])) {
+        $result = druckeBondruckerTestseite(
+            trim($_POST['bondrucker_ip'] ?? ''),
+            $_POST['bondrucker_port'] ?? 9100,
+            $_POST['bondrucker_papierbreite'] ?? '80mm'
+        );
+        setFlashMessage($result['success'] ? 'success' : 'danger', $result['message']);
+        header('Location: einstellungen.php?tab=wartung');
+        exit;
+    }
 }
 
 // Daten laden
@@ -463,6 +487,7 @@ $ustSaetze = $db->query("SELECT * FROM ust_saetze ORDER BY satz DESC")->fetchAll
 $kategorien = $db->query("SELECT * FROM kategorien ORDER BY typ, name")->fetchAll();
 $firmenprofile = $tab === 'firmenprofile' ? getAlleFirmenprofile(false) : [];
 $automatisierung = $tab === 'wartung' ? getAutomatisierungEinstellungen() : [];
+$bondrucker = $tab === 'wartung' ? getBondruckerEinstellungen() : [];
 
 // Einzeldaten für Edit
 $ustSatz = null;
@@ -1183,7 +1208,20 @@ $e1aKennzahlen = [
                                         <tr><td><code>{{datum}}</code>, <code>{{leistungsdatum}}</code>, <code>{{gueltig_bis}}</code>, <code>{{faellig_am}}</code></td><td class="small">Formatierte Daten</td></tr>
                                         <tr><td><code>{{kunde_name}}</code>, <code>{{kunde_adresse}}</code>, <code>{{kunde_uid}}</code></td><td class="small">Kundendaten</td></tr>
                                         <tr><td><code>{{betreff}}</code>, <code>{{einleitungstext}}</code>, <code>{{schlusstext}}</code></td><td class="small">Freitexte des Dokuments</td></tr>
-                                        <tr><td><code>{{positionen_tabelle}}</code></td><td class="small">Fertige Positions-Tabelle (Klasse <code>.positionen-tabelle</code>)</td></tr>
+                                        <tr><td><code>{{positionen_tabelle}}</code></td><td class="small">
+                                            Fertige Positions-Tabelle (Klasse <code>.positionen-tabelle</code>). Jede Spalte trägt zusätzlich
+                                            eine eigene Klasse zum gezielten Einstellen der Breite: <code>.spalte-pos</code>, <code>.spalte-bezeichnung</code>,
+                                            <code>.spalte-menge</code>, <code>.spalte-einzelpreis</code>, <code>.spalte-rabatt</code>, <code>.spalte-ust</code>,
+                                            <code>.spalte-netto</code>, <code>.spalte-brutto</code>. Beispiel:
+                                            <pre class="mt-1 mb-0 small">.positionen-tabelle { table-layout: fixed; }
+.positionen-tabelle .spalte-bezeichnung { width: 45%; }
+.positionen-tabelle .spalte-menge { width: 10%; }</pre>
+                                            <code>table-layout: fixed</code> wird empfohlen, sonst richten sich die Breiten weiter nach dem Inhalt.
+                                            <strong>Wichtig:</strong> <code>.positionen-tabelle</code> darf dabei KEIN eigenes <code>width: 100%</code>
+                                            haben (steht evtl. schon in der Basis-Vorlage) - das überschreibt sonst die einzelnen Spaltenbreiten.
+                                            Die Summe aller Spaltenbreiten sollte außerdem ca. 700px (bzw. 500pt) bei Standard-Seitenrändern nicht
+                                            überschreiten, sonst läuft die Tabelle rechts über den Rand hinaus.
+                                        </td></tr>
                                         <tr><td><code>{{netto_gesamt}}</code>, <code>{{ust_gesamt}}</code>, <code>{{brutto_gesamt}}</code></td><td class="small">Rohe Summenwerte</td></tr>
                                         <tr><td><code>{{summenblock}}</code></td><td class="small">Fertiger Summenblock (Kleinunternehmer-bewusst)</td></tr>
                                         <tr><td><code>{{zahlungshinweis}}</code></td><td class="small">Nur Rechnung, nur wenn IBAN gesetzt</td></tr>
@@ -1496,6 +1534,45 @@ $e1aKennzahlen = [
                             <pre class="bg-light p-2 small">*/15 * * * * php /pfad/zu/ekassa360/cron/generate_wiederkehrende_rechnungen.php >> /var/log/ekassa360_cron.log 2>&amp;1</pre>
                             <p class="mb-0 text-muted small">Danach nie wieder anfassen - Aktiv/Uhrzeit oben steuern von da an alles.</p>
                         </details>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-printer me-2"></i>Bondrucker (Netzwerk)
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">
+                            Für den Bon-Druckbutton bei Verkaufsrechnungen. Der Drucker muss per Netzwerk (IP-Adresse)
+                            erreichbar sein und ESC/POS unterstützen (Standard bei praktisch allen Netzwerk-Bondruckern, Port meist 9100).
+                        </p>
+                        <form method="POST" class="row g-3 align-items-end">
+                            <div class="col-md-3">
+                                <label class="form-label" for="bd_ip">IP-Adresse</label>
+                                <input type="text" class="form-control" name="bondrucker_ip" id="bd_ip" placeholder="z.B. 192.168.1.50" value="<?= htmlspecialchars($bondrucker['ip_adresse'] ?? '') ?>">
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label" for="bd_port">Port</label>
+                                <input type="number" class="form-control" name="bondrucker_port" id="bd_port" value="<?= (int)($bondrucker['port'] ?? 9100) ?>">
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label" for="bd_breite">Papierbreite</label>
+                                <select class="form-select" name="bondrucker_papierbreite" id="bd_breite">
+                                    <option value="80mm" <?= ($bondrucker['papierbreite'] ?? '80mm') === '80mm' ? 'selected' : '' ?>>80mm (48 Zeichen)</option>
+                                    <option value="58mm" <?= ($bondrucker['papierbreite'] ?? '') === '58mm' ? 'selected' : '' ?>>58mm (32 Zeichen)</option>
+                                </select>
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" name="save_bondrucker_einstellungen" class="btn btn-primary">
+                                    <i class="bi bi-save me-1"></i>Speichern
+                                </button>
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" name="bondrucker_testdruck" class="btn btn-outline-secondary">
+                                    <i class="bi bi-printer me-1"></i>Testdruck
+                                </button>
+                            </div>
+                        </form>
                     </div>
                 </div>
 

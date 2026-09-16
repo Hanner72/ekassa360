@@ -12,6 +12,7 @@ require_once 'includes/verkauf_functions.php';
 require_once 'includes/verkauf_pdf.php';
 require_once 'includes/paperless.php';
 require_once 'includes/mail.php';
+require_once 'includes/bondrucker.php';
 
 requireLogin();
 
@@ -128,6 +129,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             $_POST['signatur'] ?? null
         );
         setFlashMessage($result['success'] ? 'success' : 'danger', $result['success'] ? 'Rechnung per E-Mail an ' . $result['empfaenger'] . ' versendet.' : $result['error']);
+        header('Location: verkaufsrechnungen.php');
+        exit;
+    }
+
+    if ($postAction === 'bondrucken') {
+        $result = druckeVerkaufsrechnungAufBondrucker((int)$_POST['id']);
+        setFlashMessage($result['success'] ? 'success' : 'danger', $result['message']);
         header('Location: verkaufsrechnungen.php');
         exit;
     }
@@ -437,6 +445,13 @@ $pageTitle = 'Verkaufsrechnungen';
                                             <a href="verkaufsrechnungen.php?action=view&id=<?= $d['id'] ?>" class="btn btn-sm btn-outline-secondary"><i class="bi bi-eye"></i></a>
                                             <a href="pdf_verkaufsdokument.php?id=<?= $d['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary" title="PDF"><i class="bi bi-file-pdf"></i></a>
                                             <a href="pdf_lieferschein.php?id=<?= $d['id'] ?>" target="_blank" class="btn btn-sm btn-outline-secondary" title="Lieferschein"><i class="bi bi-truck"></i></a>
+                                            <?php if (bondruckerKonfiguriert()): ?>
+                                            <form method="POST" class="d-inline">
+                                                <input type="hidden" name="action" value="bondrucken">
+                                                <input type="hidden" name="id" value="<?= $d['id'] ?>">
+                                                <button type="submit" class="btn btn-sm btn-outline-secondary" title="Auf Bondrucker drucken"><i class="bi bi-printer"></i></button>
+                                            </form>
+                                            <?php endif; ?>
                                             <button type="button" class="btn btn-sm btn-outline-<?= !empty($d['versendet_am']) ? 'success' : 'secondary' ?>" data-bs-toggle="modal" data-bs-target="#versandModal"
                                                     onclick="oeffneVersandModal(<?= versandModalOnclickArgs($d) ?>)" title="<?= htmlspecialchars(versandButtonTitle($d)) ?>">
                                                 <i class="bi bi-envelope<?= !empty($d['versendet_am']) ? '-check' : '' ?>"></i>

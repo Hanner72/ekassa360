@@ -105,6 +105,7 @@ $marker = [
     'add_firmenprofile.sql' => fn($db) => tabelleExistiert($db, 'firmenprofile'),
     'add_firmenprofil_farben.sql' => fn($db) => spalteExistiert($db, 'firmenprofile', 'farbe1'),
     'add_automatisierung_einstellungen.sql' => fn($db) => tabelleExistiert($db, 'automatisierung_einstellungen'),
+    'add_bondrucker_einstellungen.sql' => fn($db) => tabelleExistiert($db, 'bondrucker_einstellungen'),
 ];
 
 echo '<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Migrations-Bootstrap</title>'

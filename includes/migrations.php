@@ -54,6 +54,7 @@ const MIGRATIONS_REIHENFOLGE = [
     'add_firmenprofile.sql',                   // braucht verkaufsdokumente + firma.logo_data/logo_mime
     'add_firmenprofil_farben.sql',             // braucht firmenprofile
     'add_automatisierung_einstellungen.sql',   // unabhängig, eigene neue Tabelle
+    'add_bondrucker_einstellungen.sql',        // unabhängig, eigene neue Tabelle
 ];
 
 function fuehreAusstehendeMigrationenAus() {

@@ -163,8 +163,13 @@ function baueDokumentPlatzhalter($doc, $positionen, $firma) {
     ], fn($z) => $z !== '');
     $kundeAdresse = implode('<br>', array_map('htmlspecialchars', $kundeAdresseZeilen));
 
-    $kopfZellen = '<th>Pos</th><th>Bezeichnung</th><th>Menge</th>'
-        . ($zeigePreise ? '<th>Einzelpreis</th><th>Rabatt</th><th>USt%</th><th>Netto</th><th>Brutto</th>' : '');
+    // Jede Kopf-/Datenzelle trägt zusätzlich eine spaltenspezifische Klasse (spalte-*), damit
+    // die Spaltenbreiten in der PDF-Vorlage per CSS gezielt einstellbar sind, z.B.
+    // ".positionen-tabelle .spalte-bezeichnung { width: 45%; }" - siehe Platzhalter-Legende in
+    // den Einstellungen (Tab "PDF-Design"). Rein additive Klassen, keine Breiten vorgegeben,
+    // daher am bisherigen Aussehen ohne eigene CSS-Regeln nichts geändert.
+    $kopfZellen = '<th class="spalte-pos">Pos</th><th class="spalte-bezeichnung">Bezeichnung</th><th class="spalte-menge">Menge</th>'
+        . ($zeigePreise ? '<th class="spalte-einzelpreis">Einzelpreis</th><th class="spalte-rabatt">Rabatt</th><th class="spalte-ust">USt%</th><th class="spalte-netto">Netto</th><th class="spalte-brutto">Brutto</th>' : '');
     $tabelle = '<table class="positionen-tabelle"><thead><tr>' . $kopfZellen . '</tr></thead><tbody>';
     foreach ($positionen as $pos) {
         $bezeichnungZelle = htmlspecialchars($pos['bezeichnung']);
@@ -173,16 +178,16 @@ function baueDokumentPlatzhalter($doc, $positionen, $firma) {
         }
 
         $tabelle .= '<tr>'
-            . '<td>' . htmlspecialchars($pos['position']) . '</td>'
-            . '<td>' . $bezeichnungZelle . '</td>'
-            . '<td>' . number_format($pos['menge'], 2, ',', '.') . ' ' . htmlspecialchars($pos['einheit']) . '</td>';
+            . '<td class="spalte-pos">' . htmlspecialchars($pos['position']) . '</td>'
+            . '<td class="spalte-bezeichnung">' . $bezeichnungZelle . '</td>'
+            . '<td class="spalte-menge">' . number_format($pos['menge'], 2, ',', '.') . ' ' . htmlspecialchars($pos['einheit']) . '</td>';
         if ($zeigePreise) {
             $rabattProzent = floatval($pos['rabatt_prozent'] ?? 0);
-            $tabelle .= '<td>' . formatBetrag($pos['einzelpreis_netto']) . '</td>'
-                . '<td>' . ($rabattProzent > 0 ? number_format($rabattProzent, 0) . '%' : '-') . '</td>'
-                . '<td>' . number_format($pos['ust_prozent'] ?? 0, 0) . '%</td>'
-                . '<td>' . formatBetrag($pos['netto_summe']) . '</td>'
-                . '<td>' . formatBetrag($pos['brutto_summe']) . '</td>';
+            $tabelle .= '<td class="spalte-einzelpreis">' . formatBetrag($pos['einzelpreis_netto']) . '</td>'
+                . '<td class="spalte-rabatt">' . ($rabattProzent > 0 ? number_format($rabattProzent, 0) . '%' : '-') . '</td>'
+                . '<td class="spalte-ust">' . number_format($pos['ust_prozent'] ?? 0, 0) . '%</td>'
+                . '<td class="spalte-netto">' . formatBetrag($pos['netto_summe']) . '</td>'
+                . '<td class="spalte-brutto">' . formatBetrag($pos['brutto_summe']) . '</td>';
         }
         $tabelle .= '</tr>';
     }

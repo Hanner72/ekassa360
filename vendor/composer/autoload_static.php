@@ -109,6 +109,7 @@ class ComposerStaticInit62e10e6c8df9afc192311b196c75bb33
         ),
         'M' => 
         array (
+            'Mike42\\' => 7,
             'Matrix\\' => 7,
             'Masterminds\\' => 12,
         ),
@@ -155,6 +156,11 @@ class ComposerStaticInit62e10e6c8df9afc192311b196c75bb33
         'PHPMailer\\PHPMailer\\' => 
         array (
             0 => __DIR__ . '/..' . '/phpmailer/phpmailer/src',
+        ),
+        'Mike42\\' => 
+        array (
+            0 => __DIR__ . '/..' . '/mike42/gfx-php/src/Mike42',
+            1 => __DIR__ . '/..' . '/mike42/escpos-php/src/Mike42',
         ),
         'Matrix\\' => 
         array (

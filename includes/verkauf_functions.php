@@ -1148,6 +1148,29 @@ function getVerkaufsrechnungZahlungsstatus($verkaufsdokumentId) {
 }
 
 /**
+ * Offene (finalisierte, aber nicht vollständig bezahlte) Verkaufsrechnungen fürs Dashboard -
+ * "finalisiert" heißt: mindestens eine Ledger-Zeile in `rechnungen` vorhanden (INNER JOIN
+ * schließt Entwürfe automatisch aus), "offen" heißt: nicht ALLE Zeilen bezahlt (analog zu
+ * getVerkaufsrechnungZahlungsstatus()). Sortiert nach Fälligkeit, überfällige zuerst.
+ */
+function getOffeneVerkaufsrechnungen($limit = 5) {
+    $db = db();
+    $stmt = $db->prepare("SELECT v.id, v.nummer, v.datum, v.faellig_am, v.brutto_gesamt,
+                                  k.firma_name, k.vorname, k.nachname
+                           FROM verkaufsdokumente v
+                           JOIN rechnungen r ON r.verkaufsdokument_id = v.id
+                           LEFT JOIN kunden k ON k.id = v.kunde_id
+                           WHERE v.typ = 'rechnung' AND v.status != 'storniert'
+                           GROUP BY v.id
+                           HAVING SUM(r.bezahlt) < COUNT(r.id)
+                           ORDER BY (v.faellig_am IS NULL), v.faellig_am ASC
+                           LIMIT ?");
+    $stmt->bindValue(1, $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    return $stmt->fetchAll();
+}
+
+/**
  * Setzt den Zahlungsstatus ALLER Ledger-Zeilen einer Verkaufsrechnung atomar
  * (eine Verkaufsrechnung kann mehrere Ledger-Zeilen haben, siehe finalizeVerkaufsrechnung()).
  */
