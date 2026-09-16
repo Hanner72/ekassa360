@@ -64,6 +64,18 @@ function bondruckerUmbruch($text, $breite) {
 }
 
 /**
+ * Betrag fürs Bon-Layout formatieren - bewusst "EUR" statt "€" (anders als formatBetrag() in
+ * includes/functions.php, das für PDF/Web gedacht ist). Das Euro-Zeichen liegt in ESC/POS in
+ * einer druckerspezifischen Zeichentabelle, deren Tabellennummer zwischen Herstellern nicht
+ * einheitlich ist - viele (v.a. günstige/generische) Bondrucker zeigen dafür ein falsches
+ * Zeichen an. "EUR" besteht nur aus druckerunabhängigen ASCII-Zeichen und funktioniert daher
+ * garantiert auf jedem ESC/POS-Drucker.
+ */
+function bondruckerBetrag($betrag) {
+    return 'EUR ' . number_format((float)$betrag, 2, ',', '.');
+}
+
+/**
  * Baut eine PrintConnector+Printer-Instanz für die aktuell konfigurierten Bondrucker-
  * Einstellungen. Wirft eine Exception, wenn keine IP konfiguriert ist oder die Verbindung
  * fehlschlägt (Timeout bewusst kurz, damit eine falsche/nicht erreichbare IP die Seite nicht
@@ -90,15 +102,38 @@ function druckeVerkaufsrechnungAufBondrucker($verkaufsdokumentId) {
     $positionen = getVerkaufsdokumentPositionen($verkaufsdokumentId);
     $firma = getFirmendaten();
 
+    // Firmenprofil (nur Name) des Dokuments, sonst das Standard-Profil - analog zur PDF-Erzeugung
+    // in baueDokumentPlatzhalter() (includes/verkauf_pdf.php). Der Profilname (z.B. der
+    // Marken-/Zweigname) kommt groß oben, der eigentliche (steuerlich relevante) Firmenname
+    // darunter - nur wenn die beiden sich unterscheiden, sonst wäre die Zeile doppelt.
+    $profil = !empty($doc['firmenprofil_id']) ? getFirmenprofil($doc['firmenprofil_id']) : null;
+    if (!$profil || !$profil['aktiv']) {
+        $profil = getStandardFirmenprofil();
+    }
+    $profilName = ($profil['name'] ?? '') ?: ($firma['name'] ?? '');
+
+    // Auftragsnummer des Vorgänger-Dokuments, falls diese Rechnung aus einem Auftrag umgewandelt
+    // wurde (umwandelnVerkaufsdokument() erlaubt nur auftrag -> rechnung, ein vorgaenger_id bei
+    // einer Rechnung ist also immer ein Auftrag).
+    $auftragsnummer = '';
+    if (!empty($doc['vorgaenger_id'])) {
+        $stmt = db()->prepare("SELECT nummer FROM verkaufsdokumente WHERE id = ?");
+        $stmt->execute([$doc['vorgaenger_id']]);
+        $auftragsnummer = (string)$stmt->fetchColumn();
+    }
+
     try {
         [$printer, $breite] = bondruckerVerbinden();
 
         $printer->setJustification(Printer::JUSTIFY_CENTER);
         $printer->setEmphasis(true);
         $printer->setTextSize(2, 2);
-        $printer->text(($firma['name'] ?? '') . "\n");
+        $printer->text($profilName . "\n");
         $printer->setTextSize(1, 1);
         $printer->setEmphasis(false);
+        if (!empty($firma['name']) && $firma['name'] !== $profilName) {
+            $printer->text($firma['name'] . "\n");
+        }
         $firmaAdresse = trim(($firma['strasse'] ?? '') . ', ' . ($firma['plz'] ?? '') . ' ' . ($firma['ort'] ?? ''), ' ,');
         if ($firmaAdresse !== '') {
             $printer->text($firmaAdresse . "\n");
@@ -112,10 +147,21 @@ function druckeVerkaufsrechnungAufBondrucker($verkaufsdokumentId) {
         $printer->setEmphasis(true);
         $printer->text('RECHNUNG ' . ($doc['nummer'] ?: '(Entwurf)') . "\n");
         $printer->setEmphasis(false);
+        if ($auftragsnummer !== '') {
+            $printer->text(bondruckerZeile('Auftrag:', $auftragsnummer, $breite) . "\n");
+        }
         $printer->text(bondruckerZeile('Datum:', formatDatum($doc['datum']), $breite) . "\n");
         $kundeName = kundenAnzeigename($doc);
         if ($kundeName !== '') {
             $printer->text(bondruckerZeile('Kunde:', $kundeName, $breite) . "\n");
+        }
+        if (!empty($doc['kundennummer'])) {
+            $printer->text(bondruckerZeile('Kundennr.:', $doc['kundennummer'], $breite) . "\n");
+        }
+        if (!empty($doc['betreff'])) {
+            foreach (bondruckerUmbruch('Betreff: ' . $doc['betreff'], $breite) as $zeile) {
+                $printer->text($zeile . "\n");
+            }
         }
         $printer->text(str_repeat('-', $breite) . "\n");
 
@@ -123,21 +169,21 @@ function druckeVerkaufsrechnungAufBondrucker($verkaufsdokumentId) {
             foreach (bondruckerUmbruch($pos['bezeichnung'], $breite) as $zeile) {
                 $printer->text($zeile . "\n");
             }
-            $mengeText = number_format($pos['menge'], 2, ',', '.') . ' ' . $pos['einheit'] . ' x ' . formatBetrag($pos['einzelpreis_netto']);
-            $printer->text(bondruckerZeile($mengeText, formatBetrag($pos['brutto_summe']), $breite) . "\n");
+            $mengeText = number_format($pos['menge'], 2, ',', '.') . ' ' . $pos['einheit'] . ' x ' . bondruckerBetrag($pos['einzelpreis_netto']);
+            $printer->text(bondruckerZeile($mengeText, bondruckerBetrag($pos['brutto_summe']), $breite) . "\n");
         }
         $printer->text(str_repeat('-', $breite) . "\n");
 
-        $printer->text(bondruckerZeile('Netto gesamt:', formatBetrag($doc['netto_gesamt']), $breite) . "\n");
+        $printer->text(bondruckerZeile('Netto gesamt:', bondruckerBetrag($doc['netto_gesamt']), $breite) . "\n");
         if (empty($firma['kleinunternehmer'])) {
-            $printer->text(bondruckerZeile('USt gesamt:', formatBetrag($doc['ust_gesamt']), $breite) . "\n");
+            $printer->text(bondruckerZeile('USt gesamt:', bondruckerBetrag($doc['ust_gesamt']), $breite) . "\n");
         } else {
-            $printer->text("Kleinunternehmer gem. § 6 Abs. 1 Z 27 UStG\n");
+            $printer->text("Kleinunternehmer gem. Art. 6 Abs. 1 Z 27 UStG\n");
         }
         $printer->setEmphasis(true);
         $printer->setTextSize(2, 1);
         // Bei doppelter Zeichenbreite passt nur die halbe Zeichenanzahl in dieselbe Papierbreite.
-        $printer->text(bondruckerZeile('BRUTTO:', formatBetrag($doc['brutto_gesamt']), (int)($breite / 2)) . "\n");
+        $printer->text(bondruckerZeile('BRUTTO:', bondruckerBetrag($doc['brutto_gesamt']), (int)($breite / 2)) . "\n");
         $printer->setTextSize(1, 1);
         $printer->setEmphasis(false);
 

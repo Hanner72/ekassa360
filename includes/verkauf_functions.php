@@ -549,7 +549,7 @@ function getVerkaufsdokumente($typ, $filters = []) {
 
 function getVerkaufsdokument($id) {
     $db = db();
-    $stmt = $db->prepare("SELECT v.*, k.firma_name, k.anrede, k.vorname, k.nachname, k.strasse, k.plz, k.ort, k.land, k.uid_nummer, k.email
+    $stmt = $db->prepare("SELECT v.*, k.kundennummer, k.firma_name, k.anrede, k.vorname, k.nachname, k.strasse, k.plz, k.ort, k.land, k.uid_nummer, k.email
                           FROM verkaufsdokumente v
                           LEFT JOIN kunden k ON v.kunde_id = k.id
                           WHERE v.id = ?");
