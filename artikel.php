@@ -275,19 +275,26 @@ $pageTitle = 'Artikel';
                                 <label class="form-label">Einheit</label>
                                 <input type="text" class="form-control" name="einheit" id="a_einheit" value="Stk">
                             </div>
-                            <div class="col-md-4">
+                            <div class="col-md-3">
                                 <label class="form-label">Einzelpreis (Netto)</label>
                                 <div class="input-group">
                                     <span class="input-group-text">€</span>
-                                    <input type="text" class="form-control" name="einzelpreis_netto" id="a_einzelpreis_netto" value="0,00">
+                                    <input type="text" class="form-control" name="einzelpreis_netto" id="a_einzelpreis_netto" value="0,00" oninput="preisNettoGeaendert()">
                                 </div>
                             </div>
-                            <div class="col-md-5">
+                            <div class="col-md-3">
+                                <label class="form-label">Einzelpreis (Brutto)</label>
+                                <div class="input-group">
+                                    <span class="input-group-text">€</span>
+                                    <input type="text" class="form-control" id="a_einzelpreis_brutto" value="0,00" oninput="preisBruttoGeaendert()">
+                                </div>
+                            </div>
+                            <div class="col-md-3">
                                 <label class="form-label">USt-Satz</label>
-                                <select class="form-select" name="ust_satz_id" id="a_ust_satz_id">
-                                    <option value="">-- Kein USt --</option>
+                                <select class="form-select" name="ust_satz_id" id="a_ust_satz_id" onchange="ustSatzGeaendert()">
+                                    <option value="" data-satz="0">-- Kein USt --</option>
                                     <?php foreach ($ustSaetze as $ust): ?>
-                                    <option value="<?= $ust['id'] ?>"><?= htmlspecialchars($ust['bezeichnung']) ?></option>
+                                    <option value="<?= $ust['id'] ?>" data-satz="<?= $ust['satz'] ?>"><?= htmlspecialchars($ust['bezeichnung']) ?></option>
                                     <?php endforeach; ?>
                                 </select>
                             </div>
@@ -545,6 +552,38 @@ $pageTitle = 'Artikel';
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // Netto/Brutto-Preisfelder im Artikel-Modal: nur einzelpreis_netto wird tatsächlich
+        // gespeichert (siehe artikel-Tabelle), das Brutto-Feld ist eine reine Eingabehilfe
+        // ohne name-Attribut und wird bei jeder Eingabe live aus dem jeweils anderen Feld
+        // + dem aktuell gewählten USt-Satz nachgerechnet.
+        function aktuellerUstSatzProzent() {
+            const select = document.getElementById('a_ust_satz_id');
+            const option = select.options[select.selectedIndex];
+            return parseFloat(option?.dataset.satz || 0);
+        }
+        function parseKommaZahl(wert) {
+            const n = parseFloat(String(wert).replace(',', '.'));
+            return isNaN(n) ? 0 : n;
+        }
+        function formatKommaZahl(wert) {
+            return wert.toFixed(2).replace('.', ',');
+        }
+        function preisNettoGeaendert() {
+            const netto = parseKommaZahl(document.getElementById('a_einzelpreis_netto').value);
+            const satz = aktuellerUstSatzProzent();
+            document.getElementById('a_einzelpreis_brutto').value = formatKommaZahl(netto * (1 + satz / 100));
+        }
+        function preisBruttoGeaendert() {
+            const brutto = parseKommaZahl(document.getElementById('a_einzelpreis_brutto').value);
+            const satz = aktuellerUstSatzProzent();
+            document.getElementById('a_einzelpreis_netto').value = formatKommaZahl(brutto / (1 + satz / 100));
+        }
+        function ustSatzGeaendert() {
+            // Netto bleibt bei einem Wechsel des USt-Satzes die feste Referenzgröße, nur
+            // Brutto wird neu berechnet (wie beim Umsatzsteuerwechsel eines Artikels üblich).
+            preisNettoGeaendert();
+        }
+
         function editArtikel(a) {
             document.getElementById('a_modalTitle').innerHTML = '<i class="bi bi-pencil me-2"></i>Artikel bearbeiten';
             document.getElementById('a_id').value = a.id;
@@ -559,6 +598,7 @@ $pageTitle = 'Artikel';
             document.getElementById('a_artikeluntergruppe_id').value = a.artikeluntergruppe_id || '';
             artikelgruppeGeaendert();
             document.getElementById('a_aktiv').checked = a.aktiv == 1;
+            preisNettoGeaendert();
         }
 
         document.getElementById('artikelModal').addEventListener('show.bs.modal', function (event) {
@@ -567,6 +607,7 @@ $pageTitle = 'Artikel';
                 this.querySelector('form').reset();
                 document.getElementById('a_id').value = '';
                 document.getElementById('a_einzelpreis_netto').value = '0,00';
+                document.getElementById('a_einzelpreis_brutto').value = '0,00';
                 document.getElementById('artikelgruppeSchnellAnlage').classList.add('d-none');
                 document.getElementById('artikeluntergruppeSchnellAnlage').classList.add('d-none');
                 artikelgruppeGeaendert();
