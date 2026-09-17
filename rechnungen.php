@@ -665,7 +665,7 @@ $rechnungen = getRechnungen($filters);
                                             <form method="POST" class="d-inline">
                                                 <input type="hidden" name="verkaufsdokument_id" value="<?= $r['verkaufsdokument_id'] ?>">
                                                 <button type="submit" name="bezahlt_und_buchungsnummer" class="btn btn-sm btn-outline-success"
-                                                        title="Markiert diese Verkaufsrechnung (alle zugehörigen Buchungszeilen) als heute bezahlt und vergibt zugleich die nächste freie Buchungsnummer.">
+                                                        title="Markiert diese Verkaufsrechnung (alle zugehörigen Buchungszeilen) als heute bezahlt und vergibt zugleich die nächste freie Buchungsnummer. Berücksichtigt automatisch Skonto, falls die Zahlungsbedingung eines vorsieht und die Frist noch läuft. Für einen abweichenden Betrag: Zahlung-Modal bei den Verkaufsrechnungen nutzen.">
                                                     <i class="bi bi-cash-coin"></i>
                                                 </button>
                                             </form>

@@ -29,6 +29,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'typ' => $TYP,
             'kunde_id' => $_POST['kunde_id'] ?: null,
             'firmenprofil_id' => $_POST['firmenprofil_id'] ?: null,
+            'zahlungsbedingung_id' => $_POST['zahlungsbedingung_id'] ?: null,
             'datum' => $_POST['datum'],
             'leistungsdatum' => $_POST['leistungsdatum'] ?: null,
             'faellig_am' => $_POST['faellig_am'] ?: null,
@@ -102,11 +103,13 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 
     if ($postAction === 'markBezahlt') {
+        $betragEingegeben = trim($_POST['betrag'] ?? '');
         $result = markVerkaufsrechnungBezahlt(
             (int)$_POST['id'],
             isset($_POST['bezahlt']) ? 1 : 0,
             $_POST['bezahlt_am'] ?: null,
-            $_POST['zahlungsart'] ?? 'bankueberweisung'
+            $_POST['zahlungsart'] ?? 'bankueberweisung',
+            $betragEingegeben !== '' ? floatval(str_replace(',', '.', $betragEingegeben)) : null
         );
         setFlashMessage($result['success'] ? 'success' : 'danger', $result['success'] ? 'Zahlungsstatus aktualisiert.' : $result['message']);
         header('Location: verkaufsrechnungen.php');
@@ -143,6 +146,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
 
 $kunden = getAlleKunden(true);
 $firmenprofile = getAlleFirmenprofile(true);
+$zahlungsbedingungen = getAlleZahlungsbedingungen(true);
+// Inkl. inaktiver Zahlungsbedingungen fürs JS-Lookup (Skonto-Berechnung im Zahlung-Modal) -
+// eine alte Rechnung kann auf eine inzwischen deaktivierte Zahlungsbedingung verweisen.
+$alleZahlungsbedingungenFuerJs = getAlleZahlungsbedingungen(false);
 $emailSignaturen = getAlleEmailSignaturen();
 $artikelListe = getAlleArtikel(true);
 $ustSaetze = getUstSaetze();
@@ -196,6 +203,22 @@ $pageTitle = 'Verkaufsrechnungen';
                     <a href="verkaufsrechnungen.php" class="btn btn-outline-secondary"><i class="bi bi-arrow-left me-1"></i>Zurück</a>
                 </div>
 
+                <?php
+                // Vorbelegte Zahlungsbedingung (bestehendes Dokument, sonst die Standard-Bedingung)
+                // ermitteln, BEVOR das Formular gerendert wird - wird sowohl für die Vorauswahl im
+                // Select als auch für den korrekten "Fällig am"-Vorschlag bei einer neuen Rechnung
+                // gebraucht (sonst würde "Fällig am" einen fixen +14-Tage-Wert zeigen, der nicht
+                // zur tatsächlich vorausgewählten Zahlungsbedingung passt).
+                $aktuelleZahlungsbedingungId = $dokument['zahlungsbedingung_id'] ?? (getStandardZahlungsbedingung()['id'] ?? null);
+                $aktuelleZahlungsbedingungDaten = null;
+                foreach ($zahlungsbedingungen as $zb) {
+                    if ($zb['id'] == $aktuelleZahlungsbedingungId) { $aktuelleZahlungsbedingungDaten = $zb; break; }
+                }
+                $rechnungsdatumDefault = $dokument['datum'] ?? date('Y-m-d');
+                $faelligAmDefault = ($aktuelleZahlungsbedingungDaten && $aktuelleZahlungsbedingungDaten['tage_bis_faellig'] !== null)
+                    ? date('Y-m-d', strtotime($rechnungsdatumDefault . ' +' . (int)$aktuelleZahlungsbedingungDaten['tage_bis_faellig'] . ' days'))
+                    : date('Y-m-d', strtotime($rechnungsdatumDefault . ' +14 days'));
+                ?>
                 <form method="POST">
                     <input type="hidden" name="action" value="save">
                     <input type="hidden" name="id" value="<?= $dokument['id'] ?? '' ?>">
@@ -216,17 +239,29 @@ $pageTitle = 'Verkaufsrechnungen';
                                 </div>
                                 <div class="col-md-3">
                                     <label class="form-label">Rechnungsdatum</label>
-                                    <input type="date" class="form-control" name="datum" value="<?= $dokument['datum'] ?? date('Y-m-d') ?>" required>
+                                    <input type="date" class="form-control" name="datum" id="r_datum" value="<?= $rechnungsdatumDefault ?>" required onchange="zahlungsbedingungGeaendert()">
                                 </div>
                                 <div class="col-md-3">
                                     <label class="form-label">Fällig am</label>
-                                    <input type="date" class="form-control" name="faellig_am" value="<?= $dokument['faellig_am'] ?? date('Y-m-d', strtotime('+14 days')) ?>">
+                                    <input type="date" class="form-control" name="faellig_am" id="r_faellig_am" value="<?= $dokument['faellig_am'] ?? $faelligAmDefault ?>">
                                 </div>
                             </div>
-                            <div class="mb-3">
-                                <label class="form-label">Leistungsdatum</label>
-                                <input type="date" class="form-control" name="leistungsdatum" value="<?= $dokument['leistungsdatum'] ?? date('Y-m-d') ?>">
-                                <div class="form-text">Pflichtangabe gem. § 11 UStG</div>
+                            <div class="row mb-3">
+                                <div class="col-md-6">
+                                    <label class="form-label">Leistungsdatum</label>
+                                    <input type="date" class="form-control" name="leistungsdatum" value="<?= $dokument['leistungsdatum'] ?? date('Y-m-d') ?>">
+                                    <div class="form-text">Pflichtangabe gem. § 11 UStG</div>
+                                </div>
+                                <div class="col-md-6">
+                                    <label class="form-label">Zahlungsbedingung</label>
+                                    <select class="form-select" name="zahlungsbedingung_id" id="r_zahlungsbedingung_id" onchange="zahlungsbedingungGeaendert()">
+                                        <?php foreach ($zahlungsbedingungen as $zb): ?>
+                                        <option value="<?= $zb['id'] ?>" data-tage="<?= $zb['tage_bis_faellig'] !== null ? (int)$zb['tage_bis_faellig'] : '' ?>" <?= $aktuelleZahlungsbedingungId == $zb['id'] ? 'selected' : '' ?>>
+                                            <?= htmlspecialchars($zb['bezeichnung']) ?><?= $zb['ist_standard'] ? ' (Standard)' : '' ?>
+                                        </option>
+                                        <?php endforeach; ?>
+                                    </select>
+                                </div>
                             </div>
                             <?php if (count($firmenprofile) > 1): ?>
                             <div class="row mb-3">
@@ -457,7 +492,7 @@ $pageTitle = 'Verkaufsrechnungen';
                                                 <i class="bi bi-envelope<?= !empty($d['versendet_am']) ? '-check' : '' ?>"></i>
                                             </button>
                                             <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal" data-bs-target="#zahlungModal"
-                                                    onclick="oeffneZahlungModal(<?= $d['id'] ?>, <?= $zs['bezahlt'] ? 'true' : 'false' ?>, '<?= $zs['bezahlt_am'] ?? '' ?>')">
+                                                    onclick="oeffneZahlungModal(<?= $d['id'] ?>, <?= $zs['bezahlt'] ? 'true' : 'false' ?>, '<?= $zs['bezahlt_am'] ?? '' ?>', '<?= $d['datum'] ?>', <?= $d['brutto_gesamt'] ?>, <?= $d['zahlungsbedingung_id'] ?: 'null' ?>)">
                                                 <i class="bi bi-cash-coin"></i>
                                             </button>
                                             <?php if (empty($d['storno_von_id'])): ?>
@@ -561,8 +596,16 @@ $pageTitle = 'Verkaufsrechnungen';
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Bezahlt am</label>
-                            <input type="date" class="form-control" name="bezahlt_am" id="z_bezahlt_am">
+                            <input type="date" class="form-control" name="bezahlt_am" id="z_bezahlt_am" onchange="zahlungsbetragVorschlagen()">
                             <div class="form-text">Maßgeblich für U30/E1a (Ist-Besteuerung)</div>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Betrag zum Einzahlen</label>
+                            <div class="input-group">
+                                <span class="input-group-text">€</span>
+                                <input type="text" class="form-control" name="betrag" id="z_betrag">
+                            </div>
+                            <div class="form-text" id="z_betrag_hinweis">Wird automatisch anhand Rechnungsbetrag und ggf. Skonto vorgeschlagen, bei Bedarf änderbar.</div>
                         </div>
                         <div class="mb-3">
                             <label class="form-label">Zahlungsart</label>
@@ -583,11 +626,82 @@ $pageTitle = 'Verkaufsrechnungen';
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/js/artikel-picker.js"></script>
     <script>
-        function oeffneZahlungModal(id, bezahlt, bezahltAm) {
+        // Schlägt "Fällig am" anhand der gewählten Zahlungsbedingung vor (tage_bis_faellig ab
+        // Rechnungsdatum) - bleibt manuell änderbar, wird nur bei Änderung von Datum/Zahlungs-
+        // bedingung neu vorgeschlagen, nie beim bloßen Laden eines bestehenden Formulars.
+        function zahlungsbedingungGeaendert() {
+            const select = document.getElementById('r_zahlungsbedingung_id');
+            const option = select?.options[select.selectedIndex];
+            const tage = option?.dataset.tage;
+            if (tage === undefined || tage === '') return;
+            const datumFeld = document.getElementById('r_datum');
+            if (!datumFeld?.value) return;
+            const datum = new Date(datumFeld.value + 'T00:00:00');
+            datum.setDate(datum.getDate() + parseInt(tage, 10));
+            // NICHT toISOString() verwenden: die rechnet auf UTC um und verschiebt das Datum in
+            // Zeitzonen vor UTC (z.B. Europe/Vienna) auf den Vortag zurück (bei 0 Tagen "Sofort"
+            // kam dadurch fälschlich das Datum VOR dem Rechnungsdatum heraus). Stattdessen direkt
+            // aus den lokalen Datumsteilen zusammensetzen.
+            const jjjj = datum.getFullYear();
+            const mm = String(datum.getMonth() + 1).padStart(2, '0');
+            const tt = String(datum.getDate()).padStart(2, '0');
+            document.getElementById('r_faellig_am').value = `${jjjj}-${mm}-${tt}`;
+        }
+
+        const zahlungsbedingungenMap = <?= json_encode(array_column($alleZahlungsbedingungenFuerJs, null, 'id')) ?>;
+        let zahlungModalKontext = null;
+
+        function heuteAlsDatumsstring() {
+            // Kein toISOString() - siehe zahlungsbedingungGeaendert() weiter oben, derselbe
+            // Zeitzonen-Fehler (verschiebt in Europe/Vienna auf den Vortag zurück).
+            const heute = new Date();
+            const jjjj = heute.getFullYear();
+            const mm = String(heute.getMonth() + 1).padStart(2, '0');
+            const tt = String(heute.getDate()).padStart(2, '0');
+            return `${jjjj}-${mm}-${tt}`;
+        }
+
+        function oeffneZahlungModal(id, bezahlt, bezahltAm, rechnungsdatum, bruttoGesamt, zahlungsbedingungId) {
             document.getElementById('z_id').value = id;
             document.getElementById('z_bezahlt').checked = bezahlt;
-            document.getElementById('z_bezahlt_am').value = bezahltAm || new Date().toISOString().slice(0, 10);
+            document.getElementById('z_bezahlt_am').value = bezahltAm || heuteAlsDatumsstring();
+            zahlungModalKontext = { rechnungsdatum, bruttoGesamt, zahlungsbedingungId };
+            zahlungsbetragVorschlagen();
+        }
+
+        // Schlägt den einzuzahlenden Betrag vor: voller Rechnungsbetrag, außer "Bezahlt am" liegt
+        // innerhalb der Skonto-Frist der Zahlungsbedingung (ab Rechnungsdatum gezählt) - dann
+        // Betrag abzüglich Skonto. Bleibt manuell überschreibbar (wird nur bei Änderung von
+        // "Bezahlt am" neu vorgeschlagen, nicht bei jedem Öffnen erneut überschrieben, falls der
+        // Nutzer den Betrag schon selbst angepasst hatte - hier aber unkritisch, da der Vorschlag
+        // ohnehin nur beim Öffnen und bei Datumsänderung läuft).
+        function zahlungsbetragVorschlagen() {
+            if (!zahlungModalKontext) return;
+            const { rechnungsdatum, bruttoGesamt, zahlungsbedingungId } = zahlungModalKontext;
+            const zb = zahlungsbedingungId ? zahlungsbedingungenMap[zahlungsbedingungId] : null;
+            const hinweisEl = document.getElementById('z_betrag_hinweis');
+            const bezahltAmWert = document.getElementById('z_bezahlt_am').value;
+
+            let betrag = parseFloat(bruttoGesamt);
+            let hinweis = 'Voller Rechnungsbetrag.';
+
+            if (zb && zb.skonto_prozent !== null && zb.skonto_tage !== null && bezahltAmWert) {
+                const skontoDatum = new Date(rechnungsdatum + 'T00:00:00');
+                skontoDatum.setDate(skontoDatum.getDate() + parseInt(zb.skonto_tage, 10));
+                const bezahltAmDatum = new Date(bezahltAmWert + 'T00:00:00');
+                if (bezahltAmDatum <= skontoDatum) {
+                    const skontoProzent = parseFloat(zb.skonto_prozent);
+                    betrag = Math.round(betrag * (1 - skontoProzent / 100) * 100) / 100;
+                    hinweis = `Inkl. ${skontoProzent}% Skonto (Zahlung innerhalb der Frist bis ${skontoDatum.toLocaleDateString('de-AT')}).`;
+                } else {
+                    hinweis = `Skonto-Frist (bis ${skontoDatum.toLocaleDateString('de-AT')}) bereits abgelaufen - voller Betrag.`;
+                }
+            }
+
+            document.getElementById('z_betrag').value = betrag.toFixed(2).replace('.', ',');
+            if (hinweisEl) hinweisEl.textContent = hinweis + ' Bei Bedarf änderbar.';
         }
 
         const emailSignaturenMap = <?= json_encode(array_column($emailSignaturen, 'inhalt', 'id')) ?>;
@@ -606,7 +720,7 @@ $pageTitle = 'Verkaufsrechnungen';
             document.getElementById('v_signatur').value = signaturText || '';
         }
 
-        const artikelDaten = <?= json_encode($artikelListe) ?>;
+        window.artikelDaten = <?= json_encode($artikelListe) ?>;
         const ustSaetze = <?= json_encode($ustSaetze) ?>;
         const bestehendePositionen = <?= json_encode($positionen) ?>;
 
@@ -614,14 +728,6 @@ $pageTitle = 'Verkaufsrechnungen';
             let html = '<option value="">-</option>';
             ustSaetze.forEach(u => {
                 html += `<option value="${u.id}" ${u.id == selectedId ? 'selected' : ''}>${u.bezeichnung}</option>`;
-            });
-            return html;
-        }
-
-        function artikelOptions(selectedId) {
-            let html = '<option value="">-- frei --</option>';
-            artikelDaten.forEach(a => {
-                html += `<option value="${a.id}" ${a.id == selectedId ? 'selected' : ''}>${a.bezeichnung}</option>`;
             });
             return html;
         }
@@ -640,7 +746,7 @@ $pageTitle = 'Verkaufsrechnungen';
                     <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="verschiebeZeile(this, -1)" title="Nach oben"><i class="bi bi-caret-up-fill"></i></button>
                     <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="verschiebeZeile(this, 1)" title="Nach unten"><i class="bi bi-caret-down-fill"></i></button>
                 </td>
-                <td><select class="form-select form-select-sm" name="pos_artikel_id[]" onchange="uebernehmeArtikel(this)">${artikelOptions(pos.artikel_id)}</select></td>
+                <td>${artikelPickerZelle(pos.artikel_id)}</td>
                 <td>
                     <input type="text" class="form-control form-control-sm mb-1" name="pos_bezeichnung[]" value="${escapeHtml(pos.bezeichnung)}" placeholder="Bezeichnung">
                     <textarea class="form-control form-control-sm" name="pos_beschreibung[]" rows="2" placeholder="Beschreibung (optional, mehrzeilig)" style="font-size: 0.8rem;">${escapeHtml(pos.beschreibung)}</textarea>

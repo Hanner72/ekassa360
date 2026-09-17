@@ -217,12 +217,58 @@ function baueDokumentPlatzhalter($doc, $positionen, $firma) {
             . '</div>';
     }
 
+    // Zahlungshinweis: frei gestaltbarer Text der gewählten Zahlungsbedingung (Einstellungen ->
+    // Zahlungsbedingungen), nicht mehr fix im Code - mit einfacher {{platzhalter}}-Ersetzung
+    // (kein Loop/Bedingungs-Engine, wie bei den PDF-Vorlagen). Ohne zugeordnete Zahlungsbedingung
+    // (z.B. ältere Rechnungen von vor Einführung dieses Features) die Standard-Bedingung.
     $zahlungshinweis = '';
-    if ($doc['typ'] === 'rechnung' && !empty($firma['iban'])) {
-        $zahlungshinweis = 'Bitte überweisen Sie den Betrag bis '
-            . ($doc['faellig_am'] ? formatDatum($doc['faellig_am']) : 'zum genannten Fälligkeitsdatum')
-            . ' auf IBAN ' . htmlspecialchars($firma['iban'])
-            . (!empty($firma['bic']) ? ' (BIC ' . htmlspecialchars($firma['bic']) . ')' : '') . '.';
+    if ($doc['typ'] === 'rechnung') {
+        $zahlungsbedingung = !empty($doc['zahlungsbedingung_id']) ? getZahlungsbedingung($doc['zahlungsbedingung_id']) : null;
+        if (!$zahlungsbedingung) {
+            $zahlungsbedingung = getStandardZahlungsbedingung();
+        }
+
+        // Skonto (Preisnachlass bei früher Zahlung) - beide Felder müssen gesetzt sein, sonst
+        // gibt es für diese Zahlungsbedingung keinen Skonto. {{skonto_datum}} zählt die Frist ab
+        // dem Rechnungsdatum, nicht ab heute.
+        $skontoProzentText = '';
+        $skontoTageText = '';
+        $skontoDatumText = '';
+        $skontoBetragText = '';
+        $skontoHinweis = '';
+        if ($zahlungsbedingung && $zahlungsbedingung['skonto_prozent'] !== null && $zahlungsbedingung['skonto_tage'] !== null) {
+            $skontoProzentWert = (float)$zahlungsbedingung['skonto_prozent'];
+            $skontoTageWert = (int)$zahlungsbedingung['skonto_tage'];
+            $skontoDatumRoh = date('Y-m-d', strtotime($doc['datum'] . ' +' . $skontoTageWert . ' days'));
+            $skontoBetragWert = round($doc['brutto_gesamt'] * (1 - $skontoProzentWert / 100), 2);
+
+            $skontoProzentText = rtrim(rtrim(number_format($skontoProzentWert, 2, ',', '.'), '0'), ',');
+            $skontoTageText = (string)$skontoTageWert;
+            $skontoDatumText = formatDatum($skontoDatumRoh);
+            $skontoBetragText = formatBetrag($skontoBetragWert);
+            $skontoHinweis = 'Bei Zahlung bis ' . htmlspecialchars($skontoDatumText) . ' gewähren wir '
+                . htmlspecialchars($skontoProzentText) . '% Skonto (Betrag: ' . htmlspecialchars($skontoBetragText) . ').';
+        }
+
+        if ($zahlungsbedingung && !empty($zahlungsbedingung['zahlungshinweis_text'])) {
+            $bicHinweis = !empty($firma['bic']) ? ' (BIC ' . htmlspecialchars($firma['bic']) . ')' : '';
+            // nl2br(htmlspecialchars(...)) VOR der Platzhalter-Ersetzung: der Text ist normaler
+            // Fließtext aus einem <textarea> (kein HTML wie bei den PDF-Vorlagen), Zeilenumbrüche
+            // sollen daher als <br> erscheinen statt von HTML verschluckt zu werden. Geschweifte
+            // Klammern der {{platzhalter}} bleiben von htmlspecialchars() unangetastet.
+            $zahlungshinweis = strtr(nl2br(htmlspecialchars($zahlungsbedingung['zahlungshinweis_text'])), [
+                '{{faellig_am}}' => $doc['faellig_am'] ? formatDatum($doc['faellig_am']) : 'zum genannten Fälligkeitsdatum',
+                '{{iban}}' => htmlspecialchars($firma['iban'] ?? ''),
+                '{{bic}}' => htmlspecialchars($firma['bic'] ?? ''),
+                '{{bic_hinweis}}' => $bicHinweis,
+                '{{bank}}' => htmlspecialchars($firma['bank'] ?? ''),
+                '{{skonto_prozent}}' => $skontoProzentText,
+                '{{skonto_tage}}' => $skontoTageText,
+                '{{skonto_datum}}' => $skontoDatumText,
+                '{{skonto_betrag}}' => $skontoBetragText,
+                '{{skonto_hinweis}}' => $skontoHinweis,
+            ]);
+        }
     }
 
     $wasserzeichen = ($doc['status'] === 'entwurf') ? '<div class="wasserzeichen">ENTWURF</div>' : '';

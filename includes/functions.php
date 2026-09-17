@@ -255,8 +255,22 @@ function saveRechnung($data) {
     $ausland_ust_betrag = !empty($data['ausland_ust_betrag']) ? str_replace(',', '.', $data['ausland_ust_betrag']) : null;
     
     // Verkauf-Modul: optionale Verknüpfung zu einem Verkaufsdokument / paperless-Dokument
-    // (Pass-through, Default null - bestehende Aufrufe aus rechnungen.php bleiben unverändert)
-    $verkaufsdokument_id = $data['verkaufsdokument_id'] ?? null;
+    // (Pass-through, Default null - bestehende Aufrufe aus rechnungen.php bleiben unverändert).
+    // WICHTIG: rechnungen.php's generisches Bearbeiten-Formular kennt/sendet
+    // verkaufsdokument_id gar nicht (kein Formularfeld dafür) - ohne die folgende Sonderbehandlung
+    // würde JEDES Speichern über dieses Formular die Verknüpfung einer aus einer Verkaufsrechnung
+    // erzeugten Kassabuch-Zeile stillschweigend auf NULL setzen (Zahlungsstatus/Skonto-Logik der
+    // Verkaufsrechnung würde die Zeile danach nicht mehr finden). Fehlt der Schlüssel im $data-
+    // Array komplett (Aufrufer hat ihn nicht mitgeschickt), wird beim Update der bestehende Wert
+    // beibehalten statt überschrieben; ist er explizit (auch als null) übergeben, gilt das wie
+    // gewohnt (z.B. finalizeVerkaufsrechnung() übergibt immer eine echte ID).
+    if (!array_key_exists('verkaufsdokument_id', $data) && !empty($data['id'])) {
+        $stmt = $db->prepare("SELECT verkaufsdokument_id FROM rechnungen WHERE id = ?");
+        $stmt->execute([$data['id']]);
+        $verkaufsdokument_id = $stmt->fetchColumn() ?: null;
+    } else {
+        $verkaufsdokument_id = $data['verkaufsdokument_id'] ?? null;
+    }
     $paperless_document_id = $data['paperless_document_id'] ?? null;
 
     if (!empty($data['id'])) {

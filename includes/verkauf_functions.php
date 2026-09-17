@@ -510,6 +510,84 @@ function deleteFirmenprofil($id) {
 }
 
 // ============================================
+// ZAHLUNGSBEDINGUNGEN (nur Verkaufsrechnungen) - Bezeichnung + optionaler Fälligkeits-
+// Vorschlag (tage_bis_faellig) + frei gestaltbarer Zahlungshinweis-Text fürs PDF.
+// ============================================
+
+function getAlleZahlungsbedingungen($nurAktiv = true) {
+    $db = db();
+    $sql = "SELECT * FROM zahlungsbedingungen";
+    if ($nurAktiv) $sql .= " WHERE aktiv = 1";
+    $sql .= " ORDER BY ist_standard DESC, bezeichnung";
+    return $db->query($sql)->fetchAll();
+}
+
+function getZahlungsbedingung($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT * FROM zahlungsbedingungen WHERE id = ?");
+    $stmt->execute([$id]);
+    return $stmt->fetch();
+}
+
+function getStandardZahlungsbedingung() {
+    $db = db();
+    return $db->query("SELECT * FROM zahlungsbedingungen WHERE ist_standard = 1 LIMIT 1")->fetch();
+}
+
+function saveZahlungsbedingung($data) {
+    $db = db();
+    $bezeichnung = trim($data['bezeichnung'] ?? '');
+    $tageBisFaellig = ($data['tage_bis_faellig'] ?? '') !== '' ? (int)$data['tage_bis_faellig'] : null;
+    $skontoProzent = ($data['skonto_prozent'] ?? '') !== '' ? floatval(str_replace(',', '.', $data['skonto_prozent'])) : null;
+    $skontoTage = ($data['skonto_tage'] ?? '') !== '' ? (int)$data['skonto_tage'] : null;
+    $zahlungshinweisText = trim($data['zahlungshinweis_text'] ?? '') ?: null;
+    $istStandard = !empty($data['ist_standard']) ? 1 : 0;
+    $aktiv = $data['aktiv'] ?? 1;
+
+    if ($istStandard) {
+        $db->exec("UPDATE zahlungsbedingungen SET ist_standard = 0");
+    }
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE zahlungsbedingungen SET bezeichnung=?, tage_bis_faellig=?, skonto_prozent=?, skonto_tage=?, zahlungshinweis_text=?, ist_standard=?, aktiv=? WHERE id=?");
+        $stmt->execute([$bezeichnung, $tageBisFaellig, $skontoProzent, $skontoTage, $zahlungshinweisText, $istStandard, $aktiv, $data['id']]);
+        if (function_exists('logAction')) {
+            logAction('zahlungsbedingungen', $data['id'], 'geaendert', 'Zahlungsbedingung bearbeitet: ' . $bezeichnung);
+        }
+        return $data['id'];
+    }
+
+    $stmt = $db->prepare("INSERT INTO zahlungsbedingungen (bezeichnung, tage_bis_faellig, skonto_prozent, skonto_tage, zahlungshinweis_text, ist_standard, aktiv) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute([$bezeichnung, $tageBisFaellig, $skontoProzent, $skontoTage, $zahlungshinweisText, $istStandard, $aktiv]);
+    $id = $db->lastInsertId();
+    if ($id && function_exists('logAction')) {
+        logAction('zahlungsbedingungen', $id, 'erstellt', 'Zahlungsbedingung erstellt: ' . $bezeichnung);
+    }
+    return $id;
+}
+
+/**
+ * Löschen nur erlaubt, wenn keine Verkaufsrechnung (mehr) darauf verweist (die
+ * Fremdschlüssel-Spalte ist ON DELETE SET NULL, würde sonst bestehende Rechnungen
+ * stillschweigend ihrer Zahlungsbedingung berauben).
+ */
+function deleteZahlungsbedingung($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM verkaufsdokumente WHERE zahlungsbedingung_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Zahlungsbedingung kann nicht gelöscht werden - es sind noch Rechnungen zugeordnet.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM zahlungsbedingungen WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('zahlungsbedingungen', $id, 'geloescht', 'Zahlungsbedingung gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
 // VERKAUFSDOKUMENTE (Angebot/Auftrag/Rechnung) - CRUD (nur Entwürfe editierbar)
 // ============================================
 
@@ -638,6 +716,11 @@ function saveVerkaufsdokument($data, $positionenInput) {
     // Firmenprofil verwenden; bei einer Umwandlung (umwandelnVerkaufsdokument()) wird das
     // Profil des Quelldokuments durchgereicht, bleibt aber im Formular änderbar.
     $firmenprofilId = $data['firmenprofil_id'] ?? (getStandardFirmenprofil()['id'] ?? null);
+    // Nur für Rechnungen relevant (Angebot/Auftrag kennen keinen Zahlungshinweis-Ausdruck) -
+    // ohne explizite Angabe die Standard-Zahlungsbedingung verwenden.
+    $zahlungsbedingungId = ($data['typ'] ?? '') === 'rechnung'
+        ? ($data['zahlungsbedingung_id'] ?? (getStandardZahlungsbedingung()['id'] ?? null))
+        : null;
     $leistungsdatum = $data['leistungsdatum'] ?? null;
     $gueltigBis = $data['gueltig_bis'] ?? null;
     $faelligAm = $data['faellig_am'] ?? null;
@@ -660,11 +743,11 @@ function saveVerkaufsdokument($data, $positionenInput) {
         if (!empty($data['id'])) {
             $verkaufsdokumentId = $data['id'];
             $stmt = $db->prepare("UPDATE verkaufsdokumente SET
-                kunde_id=?, firmenprofil_id=?, datum=?, leistungsdatum=?, gueltig_bis=?, faellig_am=?, betreff=?, einleitungstext=?, schlusstext=?,
+                kunde_id=?, firmenprofil_id=?, zahlungsbedingung_id=?, datum=?, leistungsdatum=?, gueltig_bis=?, faellig_am=?, betreff=?, einleitungstext=?, schlusstext=?,
                 gesamtrabatt_prozent=?, netto_gesamt=?, ust_gesamt=?, brutto_gesamt=?, notizen=?, geaendert_von=?
                 WHERE id=?");
             $stmt->execute([
-                $kundeId ?: null, $firmenprofilId ?: null, $data['datum'], $leistungsdatum ?: null, $gueltigBis ?: null,
+                $kundeId ?: null, $firmenprofilId ?: null, $zahlungsbedingungId ?: null, $data['datum'], $leistungsdatum ?: null, $gueltigBis ?: null,
                 $faelligAm ?: null, $betreff ?: null, $einleitungstext ?: null, $schlusstext ?: null,
                 $gesamtrabattProzent, $nettoGesamt, $ustGesamt, $bruttoGesamt,
                 $notizen ?: null, $benutzer_id, $verkaufsdokumentId
@@ -672,11 +755,11 @@ function saveVerkaufsdokument($data, $positionenInput) {
             $db->prepare("DELETE FROM verkaufsdokument_positionen WHERE verkaufsdokument_id = ?")->execute([$verkaufsdokumentId]);
         } else {
             $stmt = $db->prepare("INSERT INTO verkaufsdokumente
-                (typ, status, kunde_id, firmenprofil_id, vorgaenger_id, datum, leistungsdatum, gueltig_bis, faellig_am, betreff, einleitungstext, schlusstext,
+                (typ, status, kunde_id, firmenprofil_id, zahlungsbedingung_id, vorgaenger_id, datum, leistungsdatum, gueltig_bis, faellig_am, betreff, einleitungstext, schlusstext,
                  gesamtrabatt_prozent, netto_gesamt, ust_gesamt, brutto_gesamt, notizen, erstellt_von)
-                VALUES (?, 'entwurf', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                VALUES (?, 'entwurf', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
             $stmt->execute([
-                $data['typ'], $kundeId ?: null, $firmenprofilId ?: null, $vorgaengerId ?: null, $data['datum'],
+                $data['typ'], $kundeId ?: null, $firmenprofilId ?: null, $zahlungsbedingungId ?: null, $vorgaengerId ?: null, $data['datum'],
                 $leistungsdatum ?: null, $gueltigBis ?: null, $faelligAm ?: null,
                 $betreff ?: null, $einleitungstext ?: null, $schlusstext ?: null,
                 $gesamtrabattProzent, $nettoGesamt, $ustGesamt, $bruttoGesamt,
@@ -1171,23 +1254,90 @@ function getOffeneVerkaufsrechnungen($limit = 5) {
 }
 
 /**
+ * Vorgeschlagener Zahlbetrag für ein gegebenes Zahlungsdatum: voller Rechnungsbetrag, oder
+ * abzüglich Skonto, falls $bezahltAm innerhalb der Skonto-Frist der zugeordneten
+ * Zahlungsbedingung liegt (ab Rechnungsdatum gezählt, nicht ab heute). Analog zur
+ * JS-Funktion zahlungsbetragVorschlagen() in verkaufsrechnungen.php (dort für das Zahlung-
+ * Modal, hier für serverseitige Ein-Klick-Aktionen wie den Kassabuch-Schnell-Button) - beide
+ * Stellen bei einer Änderung dieser Logik nachziehen.
+ */
+function berechneVorgeschlagenenZahlbetrag($verkaufsdokumentId, $bezahltAm) {
+    $doc = getVerkaufsdokument($verkaufsdokumentId);
+    if (!$doc) {
+        return null;
+    }
+    $bruttoGesamt = (float)$doc['brutto_gesamt'];
+
+    $zahlungsbedingung = !empty($doc['zahlungsbedingung_id']) ? getZahlungsbedingung($doc['zahlungsbedingung_id']) : null;
+    if ($zahlungsbedingung && $zahlungsbedingung['skonto_prozent'] !== null && $zahlungsbedingung['skonto_tage'] !== null && $bezahltAm) {
+        $skontoDatum = date('Y-m-d', strtotime($doc['datum'] . ' +' . (int)$zahlungsbedingung['skonto_tage'] . ' days'));
+        if ($bezahltAm <= $skontoDatum) {
+            return round($bruttoGesamt * (1 - (float)$zahlungsbedingung['skonto_prozent'] / 100), 2);
+        }
+    }
+    return $bruttoGesamt;
+}
+
+/**
  * Setzt den Zahlungsstatus ALLER Ledger-Zeilen einer Verkaufsrechnung atomar
  * (eine Verkaufsrechnung kann mehrere Ledger-Zeilen haben, siehe finalizeVerkaufsrechnung()).
+ *
+ * $tatsaechlicherBetrag: optionaler tatsächlich eingegangener Betrag (Brutto), falls abweichend
+ * vom Rechnungsbetrag (z.B. Skonto-Abzug durch den Kunden). Ist er gesetzt und < brutto_gesamt,
+ * werden die Ledger-Zeilen (netto_betrag/ust_betrag/brutto_betrag) proportional dazu neu
+ * aufgeteilt - das wirkt sich korrekt auf U30/E1a aus (Skonto mindert die Bemessungsgrundlage
+ * tatsächlich), ohne dass die Berechnungslogik selbst angefasst werden muss. Wird IMMER frisch
+ * aus den aktuellen Positionen der Verkaufsrechnung neu berechnet (nicht kumulativ auf einen
+ * eventuell vorher schon abweichenden Ledger-Stand), damit wiederholtes Bearbeiten nicht zu
+ * Rundungsdrift führt. null (oder der volle Betrag) setzt die Ledger-Zeilen auf den vollen,
+ * ursprünglich fakturierten Betrag zurück (z.B. beim Zurücknehmen von "Bezahlt").
  */
-function markVerkaufsrechnungBezahlt($verkaufsdokumentId, $bezahlt, $bezahlt_am, $zahlungsart) {
+function markVerkaufsrechnungBezahlt($verkaufsdokumentId, $bezahlt, $bezahlt_am, $zahlungsart, $tatsaechlicherBetrag = null) {
     $db = db();
-    $stmt = $db->prepare("SELECT id FROM rechnungen WHERE verkaufsdokument_id = ?");
-    $stmt->execute([$verkaufsdokumentId]);
-    $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+    $doc = getVerkaufsdokument($verkaufsdokumentId);
+    if (!$doc) {
+        return ['success' => false, 'message' => 'Dokument nicht gefunden.'];
+    }
 
-    if (empty($ids)) {
+    $stmt = $db->prepare("SELECT id, ust_satz_id FROM rechnungen WHERE verkaufsdokument_id = ?");
+    $stmt->execute([$verkaufsdokumentId]);
+    $ledgerZeilen = $stmt->fetchAll();
+
+    if (empty($ledgerZeilen)) {
         return ['success' => false, 'message' => 'Keine Ledger-Zeilen zu diesem Dokument gefunden - bitte zuerst finalisieren.'];
     }
 
     try {
         $db->beginTransaction();
-        foreach ($ids as $id) {
-            updateRechnungZahlung($id, $bezahlt, $bezahlt_am, $zahlungsart);
+
+        $bruttoGesamt = (float)$doc['brutto_gesamt'];
+        $zahlfaktor = ($bezahlt && $tatsaechlicherBetrag !== null && $bruttoGesamt > 0)
+            ? min(1, max(0, (float)$tatsaechlicherBetrag / $bruttoGesamt))
+            : 1.0;
+
+        $positionen = getVerkaufsdokumentPositionen($verkaufsdokumentId);
+        $rabattfaktor = 1 - (floatval($doc['gesamtrabatt_prozent'] ?? 0) / 100);
+        $gruppen = [];
+        foreach ($positionen as $pos) {
+            $key = $pos['ust_satz_id'] ?? 'none';
+            if (!isset($gruppen[$key])) {
+                $gruppen[$key] = ['netto' => 0, 'ust_prozent' => (float)($pos['ust_prozent'] ?? 0)];
+            }
+            $gruppen[$key]['netto'] += $pos['netto_summe'] * $rabattfaktor;
+        }
+
+        foreach ($ledgerZeilen as $zeile) {
+            $key = $zeile['ust_satz_id'] ?? 'none';
+            if (!isset($gruppen[$key])) continue;
+            $neuNetto = round($gruppen[$key]['netto'] * $zahlfaktor, 2);
+            $neuUst = round($neuNetto * $gruppen[$key]['ust_prozent'] / 100, 2);
+            $neuBrutto = round($neuNetto + $neuUst, 2);
+            $db->prepare("UPDATE rechnungen SET netto_betrag = ?, ust_betrag = ?, brutto_betrag = ? WHERE id = ?")
+               ->execute([$neuNetto, $neuUst, $neuBrutto, $zeile['id']]);
+        }
+
+        foreach ($ledgerZeilen as $zeile) {
+            updateRechnungZahlung($zeile['id'], $bezahlt, $bezahlt_am, $zahlungsart);
         }
         $db->commit();
     } catch (Exception $e) {
@@ -1205,9 +1355,15 @@ function markVerkaufsrechnungBezahlt($verkaufsdokumentId, $bezahlt, $bezahlt_am,
  * Kassabuch typischerweise im selben Moment. Eine Verkaufsrechnung mit gemischten USt-Sätzen
  * hat mehrere Ledger-Zeilen (eine pro USt-Satz) und bekommt entsprechend mehrere, fortlaufende
  * Buchungsnummern.
+ *
+ * Ein-Klick-Aktion ohne eigene Betragseingabe - der Zahlbetrag wird deshalb automatisch anhand
+ * $bezahlt_am und einer eventuellen Skonto-Regel der Zahlungsbedingung vorgeschlagen (siehe
+ * berechneVorgeschlagenenZahlbetrag()), nicht einfach der volle Rechnungsbetrag angenommen.
+ * Für eine abweichende Betragseingabe: Zahlung-Modal bei der Verkaufsrechnung selbst nutzen.
  */
 function markVerkaufsrechnungBezahltUndVergebeBuchungsnummer($verkaufsdokumentId, $bezahlt_am, $zahlungsart) {
-    $ergebnis = markVerkaufsrechnungBezahlt($verkaufsdokumentId, true, $bezahlt_am, $zahlungsart);
+    $vorgeschlagenerBetrag = berechneVorgeschlagenenZahlbetrag($verkaufsdokumentId, $bezahlt_am);
+    $ergebnis = markVerkaufsrechnungBezahlt($verkaufsdokumentId, true, $bezahlt_am, $zahlungsart, $vorgeschlagenerBetrag);
     if (!$ergebnis['success']) {
         return $ergebnis;
     }

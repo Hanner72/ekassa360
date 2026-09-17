@@ -459,6 +459,7 @@ $pageTitle = 'Angebote';
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="assets/js/artikel-picker.js"></script>
     <script>
         const emailSignaturenMap = <?= json_encode(array_column($emailSignaturen, 'inhalt', 'id')) ?>;
 
@@ -476,7 +477,7 @@ $pageTitle = 'Angebote';
             document.getElementById('v_signatur').value = signaturText || '';
         }
 
-        const artikelDaten = <?= json_encode($artikelListe) ?>;
+        window.artikelDaten = <?= json_encode($artikelListe) ?>;
         const ustSaetze = <?= json_encode($ustSaetze) ?>;
         const bestehendePositionen = <?= json_encode($positionen) ?>;
 
@@ -484,14 +485,6 @@ $pageTitle = 'Angebote';
             let html = '<option value="">-</option>';
             ustSaetze.forEach(u => {
                 html += `<option value="${u.id}" ${u.id == selectedId ? 'selected' : ''}>${u.bezeichnung}</option>`;
-            });
-            return html;
-        }
-
-        function artikelOptions(selectedId) {
-            let html = '<option value="">-- frei --</option>';
-            artikelDaten.forEach(a => {
-                html += `<option value="${a.id}" ${a.id == selectedId ? 'selected' : ''}>${a.bezeichnung}</option>`;
             });
             return html;
         }
@@ -509,7 +502,7 @@ $pageTitle = 'Angebote';
                     <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="verschiebeZeile(this, -1)" title="Nach oben"><i class="bi bi-caret-up-fill"></i></button>
                     <button type="button" class="btn btn-sm btn-outline-secondary py-0 px-1" onclick="verschiebeZeile(this, 1)" title="Nach unten"><i class="bi bi-caret-down-fill"></i></button>
                 </td>
-                <td><select class="form-select form-select-sm" name="pos_artikel_id[]" onchange="uebernehmeArtikel(this)">${artikelOptions(pos.artikel_id)}</select></td>
+                <td>${artikelPickerZelle(pos.artikel_id)}</td>
                 <td>
                     <input type="text" class="form-control form-control-sm mb-1" name="pos_bezeichnung[]" value="${escapeHtml(pos.bezeichnung)}" placeholder="Bezeichnung">
                     <textarea class="form-control form-control-sm" name="pos_beschreibung[]" rows="2" placeholder="Beschreibung (optional, mehrzeilig)" style="font-size: 0.8rem;">${escapeHtml(pos.beschreibung)}</textarea>

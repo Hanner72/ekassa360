@@ -173,7 +173,37 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: einstellungen.php?tab=ust');
         exit;
     }
-    
+
+    // Zahlungsbedingung speichern
+    if (isset($_POST['save_zahlungsbedingung'])) {
+        $name = trim($_POST['bezeichnung'] ?? '');
+        if ($name === '') {
+            setFlashMessage('danger', 'Bitte eine Bezeichnung angeben.');
+            header('Location: einstellungen.php?tab=zahlungsbedingungen');
+            exit;
+        }
+        saveZahlungsbedingung([
+            'id' => $_POST['id'] ?: null,
+            'bezeichnung' => $name,
+            'tage_bis_faellig' => $_POST['tage_bis_faellig'] ?? '',
+            'skonto_prozent' => $_POST['skonto_prozent'] ?? '',
+            'skonto_tage' => $_POST['skonto_tage'] ?? '',
+            'zahlungshinweis_text' => $_POST['zahlungshinweis_text'] ?? '',
+            'ist_standard' => isset($_POST['ist_standard']) ? 1 : 0,
+            'aktiv' => isset($_POST['aktiv']) ? 1 : 0,
+        ]);
+        setFlashMessage('success', 'Zahlungsbedingung gespeichert.');
+        header('Location: einstellungen.php?tab=zahlungsbedingungen');
+        exit;
+    }
+
+    if (isset($_POST['delete_zahlungsbedingung'])) {
+        $result = deleteZahlungsbedingung((int)$_POST['id']);
+        setFlashMessage($result['success'] ? 'success' : 'danger', $result['success'] ? 'Zahlungsbedingung gelöscht.' : $result['message']);
+        header('Location: einstellungen.php?tab=zahlungsbedingungen');
+        exit;
+    }
+
     // Kategorie speichern
     if (isset($_POST['save_kategorie'])) {
         $id = $_POST['id'] ?? null;
@@ -488,6 +518,8 @@ $kategorien = $db->query("SELECT * FROM kategorien ORDER BY typ, name")->fetchAl
 $firmenprofile = $tab === 'firmenprofile' ? getAlleFirmenprofile(false) : [];
 $automatisierung = $tab === 'wartung' ? getAutomatisierungEinstellungen() : [];
 $bondrucker = $tab === 'wartung' ? getBondruckerEinstellungen() : [];
+$zahlungsbedingungen = $tab === 'zahlungsbedingungen' ? getAlleZahlungsbedingungen(false) : [];
+$zahlungsbedingung = ($id && $tab === 'zahlungsbedingungen') ? getZahlungsbedingung((int)$id) : null;
 
 // Einzeldaten für Edit
 $ustSatz = null;
@@ -583,6 +615,11 @@ $e1aKennzahlen = [
                     <li class="nav-item">
                         <a class="nav-link <?= $tab === 'kategorien' ? 'active' : '' ?>" href="?tab=kategorien">
                             <i class="bi bi-tags me-1"></i>Kategorien
+                        </a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link <?= $tab === 'zahlungsbedingungen' ? 'active' : '' ?>" href="?tab=zahlungsbedingungen">
+                            <i class="bi bi-cash-coin me-1"></i>Zahlungsbedingungen
                         </a>
                     </li>
                     <li class="nav-item">
@@ -1004,6 +1041,113 @@ $e1aKennzahlen = [
                             </td>
                         </tr>
                         <?php endforeach; ?>
+                        </tbody>
+                    </table>
+                </div>
+                <?php endif; ?>
+
+                <?php elseif ($tab === 'zahlungsbedingungen'): ?>
+                <!-- ZAHLUNGSBEDINGUNGEN (nur Verkaufsrechnungen) -->
+                <div class="alert alert-info">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Auswählbar beim Erstellen einer Verkaufsrechnung. Der Zahlungshinweis-Text erscheint so
+                    (mit Platzhaltern ersetzt) auf dem PDF-Ausdruck der Rechnung.
+                </div>
+                <?php if ($action === 'edit' || $action === 'new'): ?>
+                <div class="card">
+                    <div class="card-header"><?= $action === 'new' ? 'Neue Zahlungsbedingung' : 'Zahlungsbedingung bearbeiten' ?></div>
+                    <div class="card-body">
+                        <form method="POST">
+                            <input type="hidden" name="id" value="<?= $zahlungsbedingung['id'] ?? '' ?>">
+                            <div class="row mb-3">
+                                <div class="col-md-7">
+                                    <label class="form-label required">Bezeichnung</label>
+                                    <input type="text" class="form-control" name="bezeichnung" value="<?= htmlspecialchars($zahlungsbedingung['bezeichnung'] ?? '') ?>" required>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Tage bis fällig</label>
+                                    <input type="number" class="form-control" name="tage_bis_faellig" min="0" value="<?= htmlspecialchars($zahlungsbedingung['tage_bis_faellig'] ?? '') ?>" placeholder="z.B. 0 oder 14">
+                                    <div class="form-text">Schlägt im Rechnungsformular automatisch "Fällig am" vor (bleibt änderbar). Leer lassen, wenn nicht zutreffend.</div>
+                                </div>
+                                <div class="col-md-2">
+                                    <div class="form-check mt-4">
+                                        <input type="checkbox" class="form-check-input" name="aktiv" id="zb_aktiv" <?= ($zahlungsbedingung['aktiv'] ?? 1) ? 'checked' : '' ?>>
+                                        <label class="form-check-label" for="zb_aktiv">Aktiv</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="row mb-3">
+                                <div class="col-md-3">
+                                    <label class="form-label">Skonto (%)</label>
+                                    <div class="input-group">
+                                        <input type="text" class="form-control" name="skonto_prozent" value="<?= isset($zahlungsbedingung['skonto_prozent']) ? htmlspecialchars(rtrim(rtrim(number_format($zahlungsbedingung['skonto_prozent'], 2, ',', ''), '0'), ',')) : '' ?>" placeholder="z.B. 2">
+                                        <span class="input-group-text">%</span>
+                                    </div>
+                                </div>
+                                <div class="col-md-3">
+                                    <label class="form-label">Skonto-Frist (Tage)</label>
+                                    <input type="number" class="form-control" name="skonto_tage" min="0" value="<?= htmlspecialchars($zahlungsbedingung['skonto_tage'] ?? '') ?>" placeholder="z.B. 7">
+                                </div>
+                                <div class="col-md-6">
+                                    <div class="form-text mt-4">
+                                        Beide Felder leer lassen, wenn diese Zahlungsbedingung keinen Skonto vorsieht. Frist zählt ab dem
+                                        Rechnungsdatum. Ergebnis über <code>{{skonto_*}}</code>-Platzhalter im Zahlungshinweis-Text unten nutzbar.
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Zahlungshinweis-Text (für den PDF-Ausdruck)</label>
+                                <textarea class="form-control" name="zahlungshinweis_text" rows="3"><?= htmlspecialchars($zahlungsbedingung['zahlungshinweis_text'] ?? '') ?></textarea>
+                                <div class="form-text">
+                                    Platzhalter: <code>{{faellig_am}}</code>, <code>{{iban}}</code>, <code>{{bic}}</code>,
+                                    <code>{{bic_hinweis}}</code> (fertiger " (BIC ...)"-Zusatz, leer wenn keine BIC hinterlegt), <code>{{bank}}</code>.<br>
+                                    Skonto (nur falls oben ausgefüllt): <code>{{skonto_prozent}}</code>, <code>{{skonto_tage}}</code>,
+                                    <code>{{skonto_datum}}</code> (Rechnungsdatum + Skonto-Frist), <code>{{skonto_betrag}}</code> (Rechnungsbetrag abzüglich Skonto),
+                                    <code>{{skonto_hinweis}}</code> (fertiger Satz, z.B. "Bei Zahlung bis ... gewähren wir ...% Skonto (Betrag: ...).").<br>
+                                    Leer lassen, wenn auf der Rechnung kein Zahlungshinweis erscheinen soll.
+                                </div>
+                            </div>
+                            <div class="form-check mb-3">
+                                <input type="checkbox" class="form-check-input" name="ist_standard" id="zb_ist_standard" <?= ($zahlungsbedingung['ist_standard'] ?? 0) ? 'checked' : '' ?>>
+                                <label class="form-check-label" for="zb_ist_standard">Als Standard verwenden (Vorauswahl bei neuen Rechnungen)</label>
+                            </div>
+                            <button type="submit" name="save_zahlungsbedingung" class="btn btn-success">Speichern</button>
+                            <a href="?tab=zahlungsbedingungen" class="btn btn-secondary">Abbrechen</a>
+                        </form>
+                    </div>
+                </div>
+                <?php else: ?>
+                <div class="card">
+                    <div class="card-header d-flex justify-content-between">
+                        <span><i class="bi bi-cash-coin me-2"></i>Zahlungsbedingungen</span>
+                        <a href="?tab=zahlungsbedingungen&action=new" class="btn btn-light btn-sm">+ Neu</a>
+                    </div>
+                    <table class="table table-hover mb-0">
+                        <thead><tr><th>Bezeichnung</th><th class="text-center">Tage bis fällig</th><th class="text-center">Skonto</th><th>Zahlungshinweis</th><th class="text-center">Standard</th><th class="text-center">Status</th><th></th></tr></thead>
+                        <tbody>
+                        <?php if (empty($zahlungsbedingungen)): ?>
+                        <tr><td colspan="7" class="text-center text-muted py-3">Keine Zahlungsbedingungen vorhanden</td></tr>
+                        <?php else: foreach ($zahlungsbedingungen as $zb): ?>
+                        <tr class="<?= !$zb['aktiv'] ? 'table-secondary' : '' ?>">
+                            <td><?= htmlspecialchars($zb['bezeichnung']) ?></td>
+                            <td class="text-center"><?= $zb['tage_bis_faellig'] !== null ? (int)$zb['tage_bis_faellig'] : '-' ?></td>
+                            <td class="text-center">
+                                <?php if ($zb['skonto_prozent'] !== null && $zb['skonto_tage'] !== null): ?>
+                                <?= htmlspecialchars(rtrim(rtrim(number_format($zb['skonto_prozent'], 2, ',', ''), '0'), ',')) ?>% / <?= (int)$zb['skonto_tage'] ?> Tage
+                                <?php else: ?>-<?php endif; ?>
+                            </td>
+                            <td class="small text-muted"><?= htmlspecialchars(mb_strimwidth($zb['zahlungshinweis_text'] ?? '', 0, 60, '…')) ?></td>
+                            <td class="text-center"><?php if ($zb['ist_standard']): ?><span class="badge bg-primary">Standard</span><?php endif; ?></td>
+                            <td class="text-center"><span class="badge bg-<?= $zb['aktiv'] ? 'success' : 'secondary' ?>"><?= $zb['aktiv'] ? 'Aktiv' : 'Inaktiv' ?></span></td>
+                            <td class="text-end">
+                                <a href="?tab=zahlungsbedingungen&action=edit&id=<?= $zb['id'] ?>" class="btn btn-sm btn-outline-primary"><i class="bi bi-pencil"></i></a>
+                                <form method="POST" class="d-inline" onsubmit="return confirm('Zahlungsbedingung wirklich löschen?')">
+                                    <input type="hidden" name="id" value="<?= $zb['id'] ?>">
+                                    <button name="delete_zahlungsbedingung" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+                                </form>
+                            </td>
+                        </tr>
+                        <?php endforeach; endif; ?>
                         </tbody>
                     </table>
                 </div>

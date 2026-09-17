@@ -106,6 +106,8 @@ $marker = [
     'add_firmenprofil_farben.sql' => fn($db) => spalteExistiert($db, 'firmenprofile', 'farbe1'),
     'add_automatisierung_einstellungen.sql' => fn($db) => tabelleExistiert($db, 'automatisierung_einstellungen'),
     'add_bondrucker_einstellungen.sql' => fn($db) => tabelleExistiert($db, 'bondrucker_einstellungen'),
+    'add_zahlungsbedingungen.sql' => fn($db) => tabelleExistiert($db, 'zahlungsbedingungen'),
+    'add_zahlungsbedingung_skonto.sql' => fn($db) => spalteExistiert($db, 'zahlungsbedingungen', 'skonto_prozent'),
 ];
 
 echo '<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Migrations-Bootstrap</title>'
