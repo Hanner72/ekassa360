@@ -584,7 +584,10 @@ $gitInfo = null;
 if ($tab === 'wartung' && is_dir(__DIR__ . '/.git') && function_exists('shell_exec')) {
     $gitInfo = [
         'branch' => trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__) . ' rev-parse --abbrev-ref HEAD 2>&1')),
-        'commit' => trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__) . ' log -1 --format=%h\ %cd --date=format:%d.%m.%Y\ %H:%M 2>&1')),
+        // Bewusst ohne --format/%-Platzhalter: cmd.exe unter Windows interpretiert "%" in
+        // Shell-Befehlen als Umgebungsvariable und zerstört den Befehl (siehe Bugreport) -
+        // "log --oneline" liefert Hash+Betreff ohne ein einziges "%" im Befehl.
+        'commit' => trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__) . ' log -1 --oneline 2>&1')),
     ];
 }
 $zahlungsbedingungen = $tab === 'zahlungsbedingungen' ? getAlleZahlungsbedingungen(false) : [];
