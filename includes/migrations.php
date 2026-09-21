@@ -57,6 +57,8 @@ const MIGRATIONS_REIHENFOLGE = [
     'add_bondrucker_einstellungen.sql',        // unabhängig, eigene neue Tabelle
     'add_zahlungsbedingungen.sql',              // braucht verkaufsdokumente
     'add_zahlungsbedingung_skonto.sql',         // braucht zahlungsbedingungen
+    'add_paperless_tag_einstellungen.sql',      // unabhängig, eigene neue Tabelle
+    'add_paperless_einstellungen.sql',          // unabhängig, eigene neue Tabelle
 ];
 
 function fuehreAusstehendeMigrationenAus() {

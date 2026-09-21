@@ -11,35 +11,104 @@
  * nicht blockieren (Aufrufer entscheidet über Badge "nicht archiviert" / Retry).
  */
 
-if (file_exists(__DIR__ . '/../config/paperless.php')) {
-    require_once __DIR__ . '/../config/paperless.php';
+/**
+ * paperless-Konfiguration (aktiv-Schalter, Basis-URL, API-Token, SSL-Prüfung) - liegt in der
+ * Datenbank (Einstellungen -> Wartung), nicht mehr in config/paperless.php. Innerhalb eines
+ * Requests gecacht, da praktisch jede paperless-Funktion hier durchläuft.
+ *
+ * Einmaliger Auto-Import: existiert noch eine alte config/paperless.php (lokal, nicht in Git)
+ * UND ist in der Datenbank noch keine base_url hinterlegt, wird deren Inhalt einmalig in die
+ * Datenbank übernommen - damit eine bereits laufende Installation nach diesem Update nichts
+ * manuell neu eintragen muss. Danach ist ausschließlich die Datenbank (und damit die
+ * Einstellungen-Seite) maßgeblich; die alte Datei wird nicht mehr gelesen.
+ */
+function getPaperlessEinstellungen() {
+    static $cache = null;
+    if ($cache !== null) {
+        return $cache;
+    }
+
+    $db = db();
+    $row = $db->query("SELECT * FROM paperless_einstellungen WHERE id = 1")->fetch();
+    if (!$row) {
+        $row = ['id' => 1, 'aktiv' => 0, 'base_url' => null, 'api_token' => null, 'verify_ssl' => 1];
+    }
+
+    if (empty($row['base_url']) && file_exists(__DIR__ . '/../config/paperless.php')) {
+        require_once __DIR__ . '/../config/paperless.php';
+        if (defined('PAPERLESS_BASE_URL') && PAPERLESS_BASE_URL) {
+            savePaperlessEinstellungen(
+                defined('PAPERLESS_ENABLED') ? (bool)PAPERLESS_ENABLED : true,
+                PAPERLESS_BASE_URL,
+                defined('PAPERLESS_API_TOKEN') ? PAPERLESS_API_TOKEN : '',
+                defined('PAPERLESS_VERIFY_SSL') ? (bool)PAPERLESS_VERIFY_SSL : true
+            );
+            $row = $db->query("SELECT * FROM paperless_einstellungen WHERE id = 1")->fetch();
+        }
+    }
+
+    $cache = $row;
+    return $cache;
+}
+
+function savePaperlessEinstellungen($aktiv, $baseUrl, $apiToken, $verifySsl) {
+    $db = db();
+    $stmt = $db->prepare("UPDATE paperless_einstellungen SET aktiv = ?, base_url = ?, api_token = ?, verify_ssl = ? WHERE id = 1");
+    $stmt->execute([$aktiv ? 1 : 0, trim((string)$baseUrl) ?: null, trim((string)$apiToken) ?: null, $verifySsl ? 1 : 0]);
 }
 
 function paperlessConfigured() {
     // Mindestens ein Transportweg muss nutzbar sein, sonst würde jeder Aufruf mit
     // einem nicht abfangbaren PHP-Error abstürzen statt sauber "nicht verfügbar" zu melden.
     $transportVerfuegbar = function_exists('curl_init') || ini_get('allow_url_fopen');
+    $einstellungen = getPaperlessEinstellungen();
 
-    return defined('PAPERLESS_ENABLED') && PAPERLESS_ENABLED
-        && defined('PAPERLESS_BASE_URL') && PAPERLESS_BASE_URL
-        && defined('PAPERLESS_API_TOKEN') && PAPERLESS_API_TOKEN
+    return !empty($einstellungen['aktiv'])
+        && !empty($einstellungen['base_url'])
+        && !empty($einstellungen['api_token'])
         && $transportVerfuegbar;
+}
+
+/**
+ * Verbindungstest für die Einstellungen-Seite - nutzt bewusst die im Formular eingegebenen
+ * (noch ungespeicherten) Werte statt der gespeicherten Einstellungen, damit vor dem Speichern
+ * geprüft werden kann. Ruft einen möglichst günstigen Endpunkt ab (1 Dokument, keine Details).
+ */
+function testePaperlessVerbindung($baseUrl, $apiToken, $verifySsl) {
+    $baseUrl = trim((string)$baseUrl);
+    $apiToken = trim((string)$apiToken);
+    if ($baseUrl === '' || $apiToken === '') {
+        return ['success' => false, 'message' => 'Bitte Basis-URL und API-Token angeben.'];
+    }
+
+    $url = rtrim($baseUrl, '/') . '/api/documents/?page_size=1';
+    $headers = ['Authorization: Token ' . $apiToken];
+    $result = paperlessHttpTransport('GET', $url, $headers, null, 10, (bool)$verifySsl);
+    $formatiert = paperlessFormatResult($result);
+
+    if ($formatiert['success']) {
+        return ['success' => true, 'message' => 'Verbindung erfolgreich.'];
+    }
+    return ['success' => false, 'message' => 'Verbindung fehlgeschlagen: ' . ($formatiert['error'] ?: 'unbekannter Fehler')];
 }
 
 /**
  * Low-Level-HTTP-Transport: cURL falls verfügbar, sonst PHP-Streams.
  * Gibt einheitlich ['status' => int, 'body' => string|false, 'content_type' => string|null, 'error' => string|null] zurück.
+ * $verifySsl: null (Standard) liest die gespeicherten Einstellungen, ein expliziter bool-Wert
+ * überschreibt das - gedacht für pruefePaperlessVerbindung() mit noch ungespeicherten Werten.
  */
-function paperlessHttpTransport($method, $url, array $headers, $body = null, $timeoutSeconds = 20) {
-    if (function_exists('curl_init')) {
-        return paperlessHttpViaCurl($method, $url, $headers, $body, $timeoutSeconds);
+function paperlessHttpTransport($method, $url, array $headers, $body = null, $timeoutSeconds = 20, $verifySsl = null) {
+    if ($verifySsl === null) {
+        $verifySsl = !empty(getPaperlessEinstellungen()['verify_ssl']);
     }
-    return paperlessHttpViaStream($method, $url, $headers, $body, $timeoutSeconds);
+    if (function_exists('curl_init')) {
+        return paperlessHttpViaCurl($method, $url, $headers, $body, $timeoutSeconds, $verifySsl);
+    }
+    return paperlessHttpViaStream($method, $url, $headers, $body, $timeoutSeconds, $verifySsl);
 }
 
-function paperlessHttpViaCurl($method, $url, array $headers, $body, $timeoutSeconds) {
-    $verifySsl = !defined('PAPERLESS_VERIFY_SSL') || PAPERLESS_VERIFY_SSL;
-
+function paperlessHttpViaCurl($method, $url, array $headers, $body, $timeoutSeconds, $verifySsl) {
     $ch = curl_init($url);
     curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
     curl_setopt($ch, CURLOPT_CUSTOMREQUEST, $method);
@@ -63,9 +132,7 @@ function paperlessHttpViaCurl($method, $url, array $headers, $body, $timeoutSeco
     return ['status' => $status, 'body' => $responseBody, 'content_type' => $contentType, 'error' => null];
 }
 
-function paperlessHttpViaStream($method, $url, array $headers, $body, $timeoutSeconds) {
-    $verifySsl = !defined('PAPERLESS_VERIFY_SSL') || PAPERLESS_VERIFY_SSL;
-
+function paperlessHttpViaStream($method, $url, array $headers, $body, $timeoutSeconds, $verifySsl) {
     $options = [
         'http' => [
             'method' => $method,
@@ -132,12 +199,13 @@ function paperlessRequest($method, $path, $data = null) {
         return ['success' => false, 'status' => 0, 'body' => null, 'error' => 'paperless-Integration nicht konfiguriert.'];
     }
 
-    $url = rtrim(PAPERLESS_BASE_URL, '/') . $path;
+    $einstellungen = getPaperlessEinstellungen();
+    $url = rtrim($einstellungen['base_url'], '/') . $path;
     if ($method === 'GET' && !empty($data)) {
         $url .= (strpos($url, '?') === false ? '?' : '&') . http_build_query($data);
     }
 
-    $headers = ['Authorization: Token ' . PAPERLESS_API_TOKEN];
+    $headers = ['Authorization: Token ' . $einstellungen['api_token']];
     $body = null;
     if ($method !== 'GET' && $data !== null) {
         $headers[] = 'Content-Type: application/json';
@@ -174,9 +242,10 @@ function paperlessMultipartRequest($path, $fields, $fileField, $filePath, $fileN
     $body .= "Content-Type: $fileMime\r\n\r\n" . file_get_contents($filePath) . "\r\n";
     $body .= "--$boundary--\r\n";
 
-    $url = rtrim(PAPERLESS_BASE_URL, '/') . $path;
+    $einstellungen = getPaperlessEinstellungen();
+    $url = rtrim($einstellungen['base_url'], '/') . $path;
     $headers = [
-        'Authorization: Token ' . PAPERLESS_API_TOKEN,
+        'Authorization: Token ' . $einstellungen['api_token'],
         'Content-Type: multipart/form-data; boundary=' . $boundary
     ];
 
@@ -254,6 +323,34 @@ function getOrCreateTags($namen) {
     return $ids;
 }
 
+// ============================================
+// PAPERLESS-TAGS PRO DOKUMENTTYP (Angebot/Auftrag/Rechnung) - frei einstellbar in den
+// Einstellungen (Tab "Wartung"), ersetzt die frühere feste PAPERLESS_EXTRA_TAGS-Konstante.
+// ============================================
+
+function getAllePaperlessTagEinstellungen() {
+    $db = db();
+    return $db->query("SELECT * FROM paperless_tag_einstellungen")->fetchAll(PDO::FETCH_ASSOC | PDO::FETCH_UNIQUE);
+}
+
+/** Komma-getrennte Tag-Namen für einen Dokumenttyp als Array (getrimmt, Leerstrings entfernt). */
+function getPaperlessTagsFuerTyp($typ) {
+    $db = db();
+    $stmt = $db->prepare("SELECT tags FROM paperless_tag_einstellungen WHERE typ = ?");
+    $stmt->execute([$typ]);
+    $roh = $stmt->fetchColumn();
+    if (!$roh) return [];
+    return array_values(array_filter(array_map('trim', explode(',', $roh)), fn($t) => $t !== ''));
+}
+
+function savePaperlessTagsFuerTyp($typ, $tagsKommagetrennt) {
+    $db = db();
+    // Auf ein sauberes "a, b, c"-Format normalisieren statt die Roheingabe zu übernehmen.
+    $normalisiert = implode(', ', array_values(array_filter(array_map('trim', explode(',', $tagsKommagetrennt)), fn($t) => $t !== '')));
+    $stmt = $db->prepare("INSERT INTO paperless_tag_einstellungen (typ, tags) VALUES (?, ?) ON DUPLICATE KEY UPDATE tags = VALUES(tags)");
+    $stmt->execute([$typ, $normalisiert ?: null]);
+}
+
 /**
  * PDF asynchron nach paperless-ngx hochladen und auf das fertige Dokument warten.
  * $meta: ['title' => ..., 'correspondent_id' => ..., 'document_type_id' => ..., 'tag_ids' => [...]]
@@ -266,7 +363,8 @@ function uploadDocumentToPaperless($pdfPath, $meta = []) {
         return ['success' => false, 'document_id' => null, 'error' => 'PDF-Datei nicht gefunden: ' . $pdfPath];
     }
 
-    $fields = ['title' => $meta['title'] ?? basename($pdfPath)];
+    $titel = $meta['title'] ?? basename($pdfPath);
+    $fields = ['title' => $titel];
     if (!empty($meta['correspondent_id'])) $fields['correspondent'] = $meta['correspondent_id'];
     if (!empty($meta['document_type_id'])) $fields['document_type'] = $meta['document_type_id'];
     if (!empty($meta['tag_ids'])) $fields['tags'] = $meta['tag_ids'];
@@ -281,22 +379,66 @@ function uploadDocumentToPaperless($pdfPath, $meta = []) {
         return ['success' => false, 'document_id' => null, 'error' => 'Keine Task-ID von paperless erhalten.'];
     }
 
-    return pollPaperlessTask($taskId);
+    $poll = pollPaperlessTask($taskId);
+    if ($poll['success']) {
+        return $poll;
+    }
+
+    // Timeout/unklarer Task-Status: paperless verarbeitet Uploads asynchron (OCR, Texterkennung
+    // etc.) und kann dafür länger brauchen, als wir synchron im Request warten wollen - der
+    // Upload selbst ist zu diesem Zeitpunkt aber bereits abgeschlossen (sonst gäbe es gar keine
+    // Task-ID). Vor einer Fehlermeldung einmalig direkt nach dem fertigen Dokument suchen -
+    // ohne diesen Fallback würde ein "Erneut senden" das PDF ein zweites Mal hochladen, da es
+    // keinen Duplikat-Schutz gibt.
+    $gefundenId = findePaperlessDokumentPerTitel($titel);
+    if ($gefundenId) {
+        return ['success' => true, 'document_id' => $gefundenId, 'error' => null];
+    }
+
+    return $poll;
 }
 
 /**
- * Task-Status abfragen bis SUCCESS/FAILURE oder Timeout (Default max. ~10s).
+ * Sucht ein Dokument per exaktem Titel (Fallback nach einem Task-Timeout in
+ * uploadDocumentToPaperless() - der Titel enthält die Beleg-/Dokumentnummer und ist damit
+ * praktisch eindeutig). Bei mehreren Treffern das zuletzt erstellte.
  */
-function pollPaperlessTask($taskId, $maxAttempts = 10, $delaySeconds = 1) {
+function findePaperlessDokumentPerTitel($titel) {
+    $result = paperlessRequest('GET', '/api/documents/', ['title__iexact' => $titel, 'ordering' => '-created']);
+    if ($result['success'] && !empty($result['body']['results'][0]['id'])) {
+        return $result['body']['results'][0]['id'];
+    }
+    return null;
+}
+
+/**
+ * Task-Status abfragen bis success/failure oder Timeout (Default max. ~25s - paperless-ngx
+ * verarbeitet Uploads asynchron, u.a. mit OCR, das je nach Serverlast/Dokumentgröße länger als
+ * ursprünglich angenommen dauern kann; siehe zusätzlich den Titel-Fallback in
+ * uploadDocumentToPaperless() für den Fall, dass selbst das nicht reicht).
+ *
+ * Zwei API-Formate müssen abgefangen werden (unterscheidet sich je paperless-ngx-Version):
+ * - /api/tasks/ liefert manche Versionen als nackte Liste, neuere als paginierte Hülle
+ *   ({count, next, previous, results: [...]}) - beide werden unterstützt.
+ * - status kommt klein geschrieben ("success"/"failure"), nicht wie ursprünglich angenommen
+ *   groß ("SUCCESS"/"FAILURE") - Vergleich deshalb per strtolower().
+ * - die Dokument-ID der neu erzeugten Datei steht unter result_data.document_id (mit
+ *   related_document_ids[0] und dem älteren related_document als Fallback für andere Versionen).
+ */
+function pollPaperlessTask($taskId, $maxAttempts = 25, $delaySeconds = 1) {
     for ($i = 0; $i < $maxAttempts; $i++) {
         $result = paperlessRequest('GET', '/api/tasks/', ['task_id' => $taskId]);
-        if ($result['success'] && !empty($result['body'][0])) {
-            $task = $result['body'][0];
-            $status = $task['status'] ?? '';
-            if ($status === 'SUCCESS') {
-                return ['success' => true, 'document_id' => $task['related_document'] ?? null, 'error' => null];
+        $tasks = $result['body']['results'] ?? ($result['body'] ?? []);
+        if ($result['success'] && !empty($tasks[0])) {
+            $task = $tasks[0];
+            $status = strtolower($task['status'] ?? '');
+            if ($status === 'success') {
+                $documentId = $task['result_data']['document_id']
+                    ?? ($task['related_document_ids'][0] ?? null)
+                    ?? ($task['related_document'] ?? null);
+                return ['success' => true, 'document_id' => $documentId, 'error' => null];
             }
-            if ($status === 'FAILURE') {
+            if ($status === 'failure') {
                 return ['success' => false, 'document_id' => null, 'error' => is_string($task['result'] ?? null) ? $task['result'] : 'paperless-Task fehlgeschlagen.'];
             }
         }
@@ -355,8 +497,9 @@ function streamPaperlessDocument($documentId) {
         return false;
     }
 
-    $url = rtrim(PAPERLESS_BASE_URL, '/') . '/api/documents/' . intval($documentId) . '/download/';
-    $headers = ['Authorization: Token ' . PAPERLESS_API_TOKEN];
+    $einstellungen = getPaperlessEinstellungen();
+    $url = rtrim($einstellungen['base_url'], '/') . '/api/documents/' . intval($documentId) . '/download/';
+    $headers = ['Authorization: Token ' . $einstellungen['api_token']];
 
     $result = paperlessHttpTransport('GET', $url, $headers, null, 30);
 
@@ -421,7 +564,10 @@ function archiviereVerkaufsdokumentInPaperless($verkaufsdokumentId) {
     $docTypeId = getOrCreateDocumentType($typLabel);
     $titel = $typLabel . ' ' . ($doc['nummer'] ?: ('Entwurf #' . $doc['id']));
 
-    $tagNamen = array_merge([$typLabel], defined('PAPERLESS_EXTRA_TAGS') ? PAPERLESS_EXTRA_TAGS : []);
+    // Tags pro Dokumenttyp frei einstellbar (Einstellungen -> Wartung), siehe
+    // getPaperlessTagsFuerTyp() weiter oben. Ohne eigene Einstellung (z.B. frisch migriert)
+    // fällt es auf den reinen Typ-Namen zurück.
+    $tagNamen = getPaperlessTagsFuerTyp($doc['typ']) ?: [$typLabel];
     $tagIds = getOrCreateTags($tagNamen);
 
     $result = uploadDocumentToPaperless($lokalerPfad, [

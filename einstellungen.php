@@ -12,6 +12,7 @@ require_once 'includes/verkauf_pdf.php';
 require_once 'includes/mail.php';
 require_once 'includes/wiederkehrend_functions.php';
 require_once 'includes/bondrucker.php';
+require_once 'includes/paperless.php';
 
 requireLogin();
 
@@ -509,6 +510,42 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: einstellungen.php?tab=wartung');
         exit;
     }
+
+    if (isset($_POST['save_paperless_einstellungen'])) {
+        $bestehende = getPaperlessEinstellungen();
+        $neuesToken = trim($_POST['paperless_api_token'] ?? '');
+        savePaperlessEinstellungen(
+            isset($_POST['paperless_aktiv']) ? 1 : 0,
+            trim($_POST['paperless_base_url'] ?? ''),
+            $neuesToken !== '' ? $neuesToken : $bestehende['api_token'],
+            isset($_POST['paperless_verify_ssl']) ? 1 : 0
+        );
+        setFlashMessage('success', 'paperless-Einstellungen gespeichert.');
+        header('Location: einstellungen.php?tab=wartung');
+        exit;
+    }
+
+    if (isset($_POST['paperless_verbindung_testen'])) {
+        $bestehende = getPaperlessEinstellungen();
+        $neuesToken = trim($_POST['paperless_api_token'] ?? '');
+        $result = testePaperlessVerbindung(
+            trim($_POST['paperless_base_url'] ?? ''),
+            $neuesToken !== '' ? $neuesToken : $bestehende['api_token'],
+            isset($_POST['paperless_verify_ssl'])
+        );
+        setFlashMessage($result['success'] ? 'success' : 'danger', $result['message']);
+        header('Location: einstellungen.php?tab=wartung');
+        exit;
+    }
+
+    if (isset($_POST['save_paperless_tags'])) {
+        foreach (['angebot', 'auftrag', 'rechnung'] as $ptyp) {
+            savePaperlessTagsFuerTyp($ptyp, $_POST['paperless_tags_' . $ptyp] ?? '');
+        }
+        setFlashMessage('success', 'Paperless-Tags gespeichert.');
+        header('Location: einstellungen.php?tab=wartung');
+        exit;
+    }
 }
 
 // Daten laden
@@ -518,6 +555,8 @@ $kategorien = $db->query("SELECT * FROM kategorien ORDER BY typ, name")->fetchAl
 $firmenprofile = $tab === 'firmenprofile' ? getAlleFirmenprofile(false) : [];
 $automatisierung = $tab === 'wartung' ? getAutomatisierungEinstellungen() : [];
 $bondrucker = $tab === 'wartung' ? getBondruckerEinstellungen() : [];
+$paperlessEinstellungen = $tab === 'wartung' ? getPaperlessEinstellungen() : [];
+$paperlessTags = $tab === 'wartung' ? getAllePaperlessTagEinstellungen() : [];
 $zahlungsbedingungen = $tab === 'zahlungsbedingungen' ? getAlleZahlungsbedingungen(false) : [];
 $zahlungsbedingung = ($id && $tab === 'zahlungsbedingungen') ? getZahlungsbedingung((int)$id) : null;
 
@@ -1714,6 +1753,86 @@ $e1aKennzahlen = [
                             <div class="col-auto">
                                 <button type="submit" name="bondrucker_testdruck" class="btn btn-outline-secondary">
                                     <i class="bi bi-printer me-1"></i>Testdruck
+                                </button>
+                            </div>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-archive me-2"></i>paperless-ngx
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">
+                            Automatisches Archivieren von Angeboten/Aufträgen/Rechnungen in einer paperless-ngx-Instanz beim Finalisieren.
+                            Wird nicht jeder brauchen - über "Aktiv" komplett abschaltbar, ohne die übrigen Werte zu verlieren.
+                        </p>
+                        <form method="POST" class="row g-3 align-items-end">
+                            <div class="col-md-2">
+                                <div class="form-check form-switch mt-4">
+                                    <input type="checkbox" class="form-check-input" role="switch" name="paperless_aktiv" id="pl_aktiv" <?= !empty($paperlessEinstellungen['aktiv']) ? 'checked' : '' ?>>
+                                    <label class="form-check-label" for="pl_aktiv">Aktiv</label>
+                                </div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="pl_base_url">Basis-URL</label>
+                                <input type="text" class="form-control" name="paperless_base_url" id="pl_base_url" placeholder="https://paperless.example.internal" value="<?= htmlspecialchars($paperlessEinstellungen['base_url'] ?? '') ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="pl_api_token">API-Token</label>
+                                <input type="password" class="form-control" name="paperless_api_token" id="pl_api_token" autocomplete="off" placeholder="<?= !empty($paperlessEinstellungen['api_token']) ? 'Unverändert lassen, um das bestehende Token zu behalten' : 'z.B. aus paperless-ngx -> Mein Profil -> API-Token' ?>">
+                            </div>
+                            <div class="col-md-2">
+                                <div class="form-check form-switch mt-4">
+                                    <input type="checkbox" class="form-check-input" role="switch" name="paperless_verify_ssl" id="pl_verify_ssl" <?= !empty($paperlessEinstellungen['verify_ssl']) ? 'checked' : '' ?>>
+                                    <label class="form-check-label" for="pl_verify_ssl">SSL prüfen</label>
+                                </div>
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" name="save_paperless_einstellungen" class="btn btn-primary">
+                                    <i class="bi bi-save me-1"></i>Speichern
+                                </button>
+                            </div>
+                            <div class="col-auto">
+                                <button type="submit" name="paperless_verbindung_testen" class="btn btn-outline-secondary">
+                                    <i class="bi bi-plug me-1"></i>Verbindung testen
+                                </button>
+                            </div>
+                        </form>
+                        <div class="form-text mt-2">
+                            "API-Token" leer lassen, um beim Speichern/Testen das bereits hinterlegte Token weiter zu verwenden -
+                            wird aus Sicherheitsgründen nie im Feld angezeigt. "SSL prüfen" nur bei selbstsigniertem Zertifikat deaktivieren.
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">
+                        <i class="bi bi-tags me-2"></i>Paperless-Tags
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted">
+                            Tags, die beim automatischen Hochladen nach paperless-ngx pro Dokumenttyp vergeben werden.
+                            Mehrere Tags durch Komma trennen. Leer lassen für keine Tags. Wirkt erst bei künftigen Uploads
+                            (bereits archivierte Dokumente werden nicht nachträglich geändert).
+                        </p>
+                        <form method="POST" class="row g-3 align-items-end">
+                            <div class="col-md-4">
+                                <label class="form-label" for="pt_angebot">Angebot</label>
+                                <input type="text" class="form-control" name="paperless_tags_angebot" id="pt_angebot" placeholder="z.B. Angebot, MeineFirma" value="<?= htmlspecialchars($paperlessTags['angebot']['tags'] ?? '') ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="pt_auftrag">Auftrag</label>
+                                <input type="text" class="form-control" name="paperless_tags_auftrag" id="pt_auftrag" placeholder="z.B. Auftrag, MeineFirma" value="<?= htmlspecialchars($paperlessTags['auftrag']['tags'] ?? '') ?>">
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label" for="pt_rechnung">Rechnung</label>
+                                <input type="text" class="form-control" name="paperless_tags_rechnung" id="pt_rechnung" placeholder="z.B. Rechnung, MeineFirma" value="<?= htmlspecialchars($paperlessTags['rechnung']['tags'] ?? '') ?>">
+                            </div>
+                            <div class="col-12">
+                                <button type="submit" name="save_paperless_tags" class="btn btn-primary">
+                                    <i class="bi bi-save me-1"></i>Speichern
                                 </button>
                             </div>
                         </form>
