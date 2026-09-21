@@ -59,6 +59,8 @@ const MIGRATIONS_REIHENFOLGE = [
     'add_zahlungsbedingung_skonto.sql',         // braucht zahlungsbedingungen
     'add_paperless_tag_einstellungen.sql',      // unabhängig, eigene neue Tabelle
     'add_paperless_einstellungen.sql',          // unabhängig, eigene neue Tabelle
+    'add_nachrichten.sql',                      // unabhängig, eigene neue Tabelle (nur FK auf benutzer)
+    'add_aufgaben.sql',                         // braucht kunden + verkaufsdokumente (FK)
 ];
 
 function fuehreAusstehendeMigrationenAus() {

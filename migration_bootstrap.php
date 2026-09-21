@@ -110,6 +110,8 @@ $marker = [
     'add_zahlungsbedingung_skonto.sql' => fn($db) => spalteExistiert($db, 'zahlungsbedingungen', 'skonto_prozent'),
     'add_paperless_tag_einstellungen.sql' => fn($db) => tabelleExistiert($db, 'paperless_tag_einstellungen'),
     'add_paperless_einstellungen.sql' => fn($db) => tabelleExistiert($db, 'paperless_einstellungen'),
+    'add_nachrichten.sql' => fn($db) => tabelleExistiert($db, 'nachrichten'),
+    'add_aufgaben.sql' => fn($db) => tabelleExistiert($db, 'aufgaben'),
 ];
 
 echo '<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Migrations-Bootstrap</title>'
