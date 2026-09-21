@@ -7,15 +7,18 @@
 ini_set('default_charset', 'UTF-8');
 header('Content-Type: text/html; charset=UTF-8');
 
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'ekassa360');
-define('DB_USER', 'root');
-define('DB_PASS', '');
-
-/* define('DB_HOST', 'localhost');
-define('DB_NAME', 'ekassa360');
-define('DB_USER', 'Hanner72');
-define('DB_PASS', '***********'); */
+// Umgebungsspezifische Zugangsdaten liegen in config/database.local.php (nicht in Git,
+// siehe .gitignore) - damit ein "git pull" auf dem Live-Server nie die dortigen echten
+// Zugangsdaten mit diesen lokalen Laragon-Standardwerten überschreibt. Existiert die Datei
+// nicht (z.B. frische lokale Installation), gelten die Laragon-Standardwerte unten.
+if (file_exists(__DIR__ . '/database.local.php')) {
+    require __DIR__ . '/database.local.php';
+} else {
+    define('DB_HOST', 'localhost');
+    define('DB_NAME', 'ekassa360');
+    define('DB_USER', 'root');
+    define('DB_PASS', '');
+}
 
 class Database {
     private static $instance = null;

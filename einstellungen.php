@@ -546,7 +546,30 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         header('Location: einstellungen.php?tab=wartung');
         exit;
     }
+
+    // Update per Git-Pull (Deployment) - nur Admins, führt den fest hinterlegten Befehl aus,
+    // nimmt keinerlei Benutzereingabe in den Shell-Befehl auf
+    if (isset($_POST['git_pull_deploy'])) {
+        requireAdmin();
+        $projectDir = __DIR__;
+        if (!is_dir($projectDir . '/.git')) {
+            setFlashMessage('danger', 'Kein Git-Repository gefunden - einmalige Einrichtung auf dem Server nötig.');
+        } elseif (!function_exists('shell_exec')) {
+            setFlashMessage('danger', 'shell_exec ist auf diesem Server deaktiviert - Update per Button nicht möglich.');
+        } else {
+            $ausgabe = shell_exec('git -C ' . escapeshellarg($projectDir) . ' pull 2>&1');
+            $ausgabe = $ausgabe !== null ? trim($ausgabe) : '(keine Ausgabe erhalten)';
+            logAction('system', 0, 'geaendert', "Deployment: git pull ausgeführt.\n" . $ausgabe);
+            $_SESSION['deploy_ausgabe'] = $ausgabe;
+            setFlashMessage('success', 'Update ausgeführt - Ausgabe siehe unten. Etwaige Datenbank-Migrationen laufen automatisch beim nächsten Seitenaufruf.');
+        }
+        header('Location: einstellungen.php?tab=wartung');
+        exit;
+    }
 }
+
+$deployAusgabe = $_SESSION['deploy_ausgabe'] ?? null;
+unset($_SESSION['deploy_ausgabe']);
 
 // Daten laden
 $firma = $db->query("SELECT * FROM firma LIMIT 1")->fetch();
@@ -557,6 +580,13 @@ $automatisierung = $tab === 'wartung' ? getAutomatisierungEinstellungen() : [];
 $bondrucker = $tab === 'wartung' ? getBondruckerEinstellungen() : [];
 $paperlessEinstellungen = $tab === 'wartung' ? getPaperlessEinstellungen() : [];
 $paperlessTags = $tab === 'wartung' ? getAllePaperlessTagEinstellungen() : [];
+$gitInfo = null;
+if ($tab === 'wartung' && is_dir(__DIR__ . '/.git') && function_exists('shell_exec')) {
+    $gitInfo = [
+        'branch' => trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__) . ' rev-parse --abbrev-ref HEAD 2>&1')),
+        'commit' => trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__) . ' log -1 --format=%h\ %cd --date=format:%d.%m.%Y\ %H:%M 2>&1')),
+    ];
+}
 $zahlungsbedingungen = $tab === 'zahlungsbedingungen' ? getAlleZahlungsbedingungen(false) : [];
 $zahlungsbedingung = ($id && $tab === 'zahlungsbedingungen') ? getZahlungsbedingung((int)$id) : null;
 
@@ -1625,6 +1655,43 @@ $e1aKennzahlen = [
                 </div>
                 <?php elseif ($tab === 'wartung'): ?>
                 <!-- WARTUNG -->
+                <div class="card mb-4 border-primary">
+                    <div class="card-header bg-primary text-white">
+                        <i class="bi bi-cloud-download me-2"></i>Update
+                    </div>
+                    <div class="card-body">
+                        <?php if ($gitInfo): ?>
+                            <p class="mb-2">
+                                Aktueller Branch: <code><?= htmlspecialchars($gitInfo['branch']) ?></code>
+                                &middot; Letzter Commit: <code><?= htmlspecialchars($gitInfo['commit']) ?></code>
+                            </p>
+                            <p class="text-muted">
+                                Holt den neuesten Stand von GitHub (<code>git pull</code>) für den aktuell ausgecheckten Branch.
+                                Datenbank-Migrationen laufen danach automatisch beim nächsten Seitenaufruf - kein weiterer Schritt nötig.
+                            </p>
+                            <?php if (!isAdmin()): ?>
+                                <div class="alert alert-secondary mb-0">Nur Administratoren können ein Update auslösen.</div>
+                            <?php else: ?>
+                                <form method="POST" onsubmit="return confirm('Jetzt den neuesten Stand von GitHub laden?')">
+                                    <button type="submit" name="git_pull_deploy" class="btn btn-primary">
+                                        <i class="bi bi-arrow-repeat me-1"></i>Jetzt aktualisieren
+                                    </button>
+                                </form>
+                            <?php endif; ?>
+                            <?php if ($deployAusgabe !== null): ?>
+                                <hr>
+                                <p class="mb-1"><strong>Ausgabe:</strong></p>
+                                <pre class="bg-light p-2 small" style="white-space: pre-wrap;"><?= htmlspecialchars($deployAusgabe) ?></pre>
+                            <?php endif; ?>
+                        <?php else: ?>
+                            <div class="alert alert-warning mb-0">
+                                Kein Git-Repository unter <code><?= htmlspecialchars(__DIR__) ?></code> gefunden (oder <code>shell_exec</code> ist deaktiviert) -
+                                einmalige Einrichtung auf diesem Server nötig, bevor der Update-Button funktioniert.
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                </div>
+
                 <div class="row">
                     <div class="col-md-6">
                         <div class="card mb-4">
