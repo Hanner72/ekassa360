@@ -135,7 +135,8 @@ $statusLabels = ['offen' => 'Offen', 'in_arbeit' => 'In Arbeit', 'erledigt' => '
                                 <tr>
                                     <th>Titel</th>
                                     <th>Zugewiesen an</th>
-                                    <th>Verknüpft mit</th>
+                                    <th>Kunde</th>
+                                    <th>Dokument</th>
                                     <th>Fällig am</th>
                                     <th>Priorität</th>
                                     <th>Status</th>
@@ -144,7 +145,7 @@ $statusLabels = ['offen' => 'Offen', 'in_arbeit' => 'In Arbeit', 'erledigt' => '
                             </thead>
                             <tbody>
                                 <?php if (empty($aufgaben)): ?>
-                                <tr><td colspan="7" class="text-center text-muted py-4">Keine Aufgaben gefunden.</td></tr>
+                                <tr><td colspan="8" class="text-center text-muted py-4">Keine Aufgaben gefunden.</td></tr>
                                 <?php endif; ?>
                                 <?php foreach ($aufgaben as $a): ?>
                                 <tr class="<?= $a['status'] === 'erledigt' ? 'text-muted' : '' ?>">
@@ -156,10 +157,25 @@ $statusLabels = ['offen' => 'Offen', 'in_arbeit' => 'In Arbeit', 'erledigt' => '
                                     </td>
                                     <td><?= htmlspecialchars($a['zugewiesen_vorname'] ? trim($a['zugewiesen_vorname'] . ' ' . $a['zugewiesen_nachname']) : ($a['zugewiesen_benutzername'] ?? '—')) ?></td>
                                     <td>
-                                        <?php if (!empty($a['verkaufsdokument_id'])): ?>
-                                            <span class="badge bg-light text-dark border"><?= htmlspecialchars($typLabels[$a['verkaufsdokument_typ']] ?? '') ?> <?= htmlspecialchars($a['verkaufsdokument_nummer']) ?></span>
-                                        <?php elseif (!empty($a['kunde_id'])): ?>
-                                            <span class="badge bg-light text-dark border"><i class="bi bi-person-vcard"></i> <?= htmlspecialchars($a['kunde_firma_name'] ?: trim($a['kunde_vorname'] . ' ' . $a['kunde_nachname'])) ?></span>
+                                        <?php if (!empty($a['anzeige_kunde_id'])): ?>
+                                            <a href="kunden.php?edit=<?= $a['anzeige_kunde_id'] ?>" class="text-decoration-none">
+                                                <i class="bi bi-person-vcard"></i> <?= htmlspecialchars($a['kunde_firma_name'] ?: trim($a['kunde_vorname'] . ' ' . $a['kunde_nachname'])) ?>
+                                            </a>
+                                        <?php else: ?>
+                                            <span class="text-muted">—</span>
+                                        <?php endif; ?>
+                                    </td>
+                                    <td>
+                                        <?php if (!empty($a['verkaufsdokument_id'])):
+                                            $dokSeite = ['angebot' => 'angebote.php', 'auftrag' => 'auftraege.php', 'rechnung' => 'verkaufsrechnungen.php'][$a['verkaufsdokument_typ']] ?? null;
+                                        ?>
+                                            <?php if ($dokSeite): ?>
+                                            <a href="<?= $dokSeite ?>?action=view&id=<?= $a['verkaufsdokument_id'] ?>" class="badge bg-light text-dark border text-decoration-none">
+                                                <?= htmlspecialchars($typLabels[$a['verkaufsdokument_typ']] ?? '') ?> <?= htmlspecialchars($a['verkaufsdokument_nummer']) ?>
+                                            </a>
+                                            <?php else: ?>
+                                            <span class="badge bg-light text-dark border"><?= htmlspecialchars($a['verkaufsdokument_nummer']) ?></span>
+                                            <?php endif; ?>
                                         <?php else: ?>
                                             <span class="text-muted">—</span>
                                         <?php endif; ?>

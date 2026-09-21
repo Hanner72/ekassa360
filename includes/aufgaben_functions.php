@@ -32,13 +32,17 @@ function getAufgaben($filters = []) {
     $sql = "SELECT a.*,
                    zb.benutzername AS zugewiesen_benutzername, zb.vorname AS zugewiesen_vorname, zb.nachname AS zugewiesen_nachname,
                    eb.benutzername AS erstellt_benutzername,
-                   k.firma_name AS kunde_firma_name, k.vorname AS kunde_vorname, k.nachname AS kunde_nachname,
+                   COALESCE(k.id, dk.id) AS anzeige_kunde_id,
+                   COALESCE(k.firma_name, dk.firma_name) AS kunde_firma_name,
+                   COALESCE(k.vorname, dk.vorname) AS kunde_vorname,
+                   COALESCE(k.nachname, dk.nachname) AS kunde_nachname,
                    v.typ AS verkaufsdokument_typ, v.nummer AS verkaufsdokument_nummer
             FROM aufgaben a
             LEFT JOIN benutzer zb ON a.zugewiesen_an = zb.id
             LEFT JOIN benutzer eb ON a.erstellt_von = eb.id
             LEFT JOIN kunden k ON a.kunde_id = k.id
-            LEFT JOIN verkaufsdokumente v ON a.verkaufsdokument_id = v.id";
+            LEFT JOIN verkaufsdokumente v ON a.verkaufsdokument_id = v.id
+            LEFT JOIN kunden dk ON v.kunde_id = dk.id";
     if ($where) {
         $sql .= " WHERE " . implode(" AND ", $where);
     }
