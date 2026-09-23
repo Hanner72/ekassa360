@@ -13,3 +13,6 @@ config/database.local.php
 
 # Zugangsdaten für den (nicht mehr genutzten) SFTP/FTP-Upload - gehören nie ins Repo
 .vscode/sftp.json
+
+# Personal Access Token für die GitHub-API (Release-Erstellung ohne gh-CLI) - niemals commiten
+.github_token
