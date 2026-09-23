@@ -581,12 +581,25 @@ $paperlessEinstellungen = $tab === 'wartung' ? getPaperlessEinstellungen() : [];
 $paperlessTags = $tab === 'wartung' ? getAllePaperlessTagEinstellungen() : [];
 $gitInfo = null;
 if ($tab === 'wartung' && is_dir(__DIR__ . '/.git') && function_exists('shell_exec')) {
+    // Fetch (ohne zu mergen) bevor wir prüfen, ob es Neues gibt - sonst würden wir nur den
+    // Stand vom letzten Pull/Fetch sehen. Schlägt das mangels Netzwerk fehl, bleiben die
+    // lokalen Refs einfach wie sie sind (kein Fehler für den Nutzer sichtbar).
+    shell_exec('git -C ' . escapeshellarg(__DIR__) . ' fetch origin --tags 2>&1');
+
+    $commitsHinterher = trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__) . ' rev-list --count HEAD..@{u} 2>&1'));
+    $version = trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__) . ' describe --tags 2>&1'));
+    if ($version === '' || stripos($version, 'fatal') !== false) {
+        $version = null;
+    }
+
     $gitInfo = [
         'branch' => trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__) . ' rev-parse --abbrev-ref HEAD 2>&1')),
         // Bewusst ohne --format/%-Platzhalter: cmd.exe unter Windows interpretiert "%" in
         // Shell-Befehlen als Umgebungsvariable und zerstört den Befehl (siehe Bugreport) -
         // "log --oneline" liefert Hash+Betreff ohne ein einziges "%" im Befehl.
         'commit' => trim((string) shell_exec('git -C ' . escapeshellarg(__DIR__) . ' log -1 --oneline 2>&1')),
+        'version' => $version,
+        'commits_hinterher' => ctype_digit($commitsHinterher) ? (int) $commitsHinterher : null,
     ];
 }
 $zahlungsbedingungen = $tab === 'zahlungsbedingungen' ? getAlleZahlungsbedingungen(false) : [];
@@ -1641,8 +1654,26 @@ $e1aKennzahlen = [
                         <?php if ($gitInfo): ?>
                             <p class="mb-2">
                                 Aktueller Branch: <code><?= htmlspecialchars($gitInfo['branch']) ?></code>
+                                <?php if ($gitInfo['version']): ?>
+                                &middot; Version: <code><?= htmlspecialchars($gitInfo['version']) ?></code>
+                                <?php endif; ?>
                                 &middot; Letzter Commit: <code><?= htmlspecialchars($gitInfo['commit']) ?></code>
                             </p>
+                            <?php if ($gitInfo['commits_hinterher'] === null): ?>
+                                <div class="alert alert-secondary">
+                                    <i class="bi bi-question-circle me-1"></i>Konnte nicht mit GitHub abgleichen (kein Netzwerk oder Branch hat keinen Upstream).
+                                </div>
+                            <?php elseif ($gitInfo['commits_hinterher'] > 0): ?>
+                                <div class="alert alert-warning">
+                                    <i class="bi bi-exclamation-circle-fill me-1"></i>
+                                    <strong>Update verfügbar!</strong> <?= $gitInfo['commits_hinterher'] ?>
+                                    neue<?= $gitInfo['commits_hinterher'] === 1 ? 'r' : '' ?> Commit<?= $gitInfo['commits_hinterher'] === 1 ? '' : 's' ?> auf GitHub, noch nicht auf diesem Server.
+                                </div>
+                            <?php else: ?>
+                                <div class="alert alert-success">
+                                    <i class="bi bi-check-circle-fill me-1"></i>Aktuell - kein Update verfügbar.
+                                </div>
+                            <?php endif; ?>
                             <p class="text-muted">
                                 Holt den neuesten Stand von GitHub (<code>git pull</code>) für den aktuell ausgecheckten Branch.
                                 Datenbank-Migrationen laufen danach automatisch beim nächsten Seitenaufruf - kein weiterer Schritt nötig.
@@ -1902,7 +1933,7 @@ $e1aKennzahlen = [
                                     <tr><td>PHP Version</td><td><img src="https://img.shields.io/badge/PHP-<?= phpversion() ?>-blue" alt=""></td></tr>
                                     <!-- <tr><td>MySQL Version</td><td><code><?= $db->query("SELECT VERSION()")->fetchColumn() ?></code></td></tr> -->
                                     <tr><td>MySQL Version</td><td><img src="https://img.shields.io/badge/MySQL-<?= $db->query("SELECT VERSION()")->fetchColumn() ?>-777BB4" alt=""></td></tr>
-                                    <tr><td>EKassa360 Version</td><td><img src="https://img.shields.io/badge/Version-v0.1.7-lightgreen" alt=""></td></tr>
+                                    <tr><td>EKassa360 Version</td><td><img src="https://img.shields.io/badge/Version-<?= urlencode($gitInfo['version'] ?? 'unbekannt') ?>-lightgreen" alt=""></td></tr>
                                     <tr><td>EKassa360 auf Github</td><td><img src="https://img.shields.io/github/v/release/Hanner72/ekassa360?include_prereleases" alt=""></td></tr>
                                 </table>
                             </div>
