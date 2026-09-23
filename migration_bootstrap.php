@@ -112,6 +112,9 @@ $marker = [
     'add_paperless_einstellungen.sql' => fn($db) => tabelleExistiert($db, 'paperless_einstellungen'),
     'add_nachrichten.sql' => fn($db) => tabelleExistiert($db, 'nachrichten'),
     'add_aufgaben.sql' => fn($db) => tabelleExistiert($db, 'aufgaben'),
+    'add_nummernkreis_einmalig.sql' => fn($db) => (bool) $db->query(
+        "SELECT 1 FROM information_schema.statistics WHERE table_schema = DATABASE() AND table_name = 'nummernkreise' AND index_name = 'unique_schluessel'"
+    )->fetchColumn(),
 ];
 
 echo '<!DOCTYPE html><html lang="de"><head><meta charset="UTF-8"><title>Migrations-Bootstrap</title>'

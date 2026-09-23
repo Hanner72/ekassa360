@@ -250,15 +250,14 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             }
         } else {
             $schluessel = $_POST['schluessel'] ?? 'rechnung';
-            $jahr = (int)($_POST['jahr'] ?? date('Y'));
             try {
                 $stmt = $db->prepare("INSERT INTO nummernkreise (schluessel, jahr, format, naechste_nummer) VALUES (?, ?, ?, ?)");
-                $stmt->execute([$schluessel, $jahr, $format, $naechsteNummer]);
+                $stmt->execute([$schluessel, date('Y'), $format, $naechsteNummer]);
                 if (function_exists('logAction')) {
-                    logAction('nummernkreise', $db->lastInsertId(), 'erstellt', "Nummernkreis angelegt: $schluessel $jahr");
+                    logAction('nummernkreise', $db->lastInsertId(), 'erstellt', "Nummernkreis angelegt: $schluessel");
                 }
             } catch (PDOException $e) {
-                setFlashMessage('danger', "Für $schluessel/$jahr existiert bereits ein Nummernkreis.");
+                setFlashMessage('danger', "Für $schluessel existiert bereits ein Nummernkreis.");
                 header('Location: einstellungen.php?tab=nummernkreise');
                 exit;
             }
@@ -611,7 +610,7 @@ if ($id && $tab === 'kategorien') {
 $nummernkreise = [];
 $nummernkreis = null;
 if ($tab === 'nummernkreise') {
-    $nummernkreise = $db->query("SELECT * FROM nummernkreise ORDER BY jahr DESC, schluessel")->fetchAll();
+    $nummernkreise = $db->query("SELECT * FROM nummernkreise ORDER BY schluessel")->fetchAll();
     if ($id) {
         $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE id = ?");
         $stmt->execute([$id]);
@@ -1234,7 +1233,7 @@ $e1aKennzahlen = [
                         <form method="POST">
                             <input type="hidden" name="id" value="<?= $nummernkreis['id'] ?? '' ?>">
                             <div class="row mb-3">
-                                <div class="col-md-4">
+                                <div class="col-md-6">
                                     <label class="form-label">Dokumenttyp *</label>
                                     <?php if ($action === 'edit'): ?>
                                     <input type="text" class="form-control" value="<?= $nummernkreisSchluesselLabels[$nummernkreis['schluessel']] ?? $nummernkreis['schluessel'] ?>" disabled>
@@ -1246,16 +1245,7 @@ $e1aKennzahlen = [
                                     </select>
                                     <?php endif; ?>
                                 </div>
-                                <div class="col-md-4">
-                                    <label class="form-label">Jahr *</label>
-                                    <?php if ($action === 'edit'): ?>
-                                    <input type="text" class="form-control" value="<?= $nummernkreis['schluessel'] === 'kunde' ? 'Kein Jahresbezug' : $nummernkreis['jahr'] ?>" disabled>
-                                    <?php else: ?>
-                                    <input type="number" class="form-control" name="jahr" id="nk_jahr" value="<?= date('Y') ?>" required>
-                                    <div class="form-text" id="nk_jahr_hinweis" style="display:none;">Kundennummern sind nicht jahresgebunden - Jahr wird ignoriert (auf 0 gesetzt).</div>
-                                    <?php endif; ?>
-                                </div>
-                                <div class="col-md-4">
+                                <div class="col-md-6">
                                     <label class="form-label">Nächste Nummer *</label>
                                     <input type="number" class="form-control" id="nk_naechste_nummer" name="naechste_nummer" min="1" value="<?= $nummernkreis['naechste_nummer'] ?? 1 ?>" required>
                                 </div>
@@ -1267,7 +1257,9 @@ $e1aKennzahlen = [
                                 <div class="form-text">
                                     Platzhalter: <code>{JJJJ}</code> Jahr 4-stellig, <code>{JJ}</code> Jahr 2-stellig,
                                     <code>{MM}</code> Monat, <code>{TT}</code> Tag (jeweils vom Belegdatum) ·
-                                    <code>{NNNN}</code> laufende Nummer (Anzahl der <code>N</code> = Anzahl Stellen, z.B. <code>{NNN}</code> = 3-stellig)
+                                    <code>{NNNN}</code> laufende Nummer (Anzahl der <code>N</code> = Anzahl Stellen, z.B. <code>{NNN}</code> = 3-stellig).
+                                    Enthält das Format <code>{JJJJ}</code> oder <code>{JJ}</code>, startet die Nummer beim ersten Beleg
+                                    eines neuen Jahres automatisch wieder bei 1 - ohne Jahres-Platzhalter läuft sie unbegrenzt weiter.
                                 </div>
                             </div>
                             <div class="alert alert-secondary">
@@ -1305,31 +1297,15 @@ $e1aKennzahlen = [
                     document.getElementById('nk_naechste_nummer').addEventListener('input', nkAktualisiereVorschau);
                     nkAktualisiereVorschau();
 
-                    // "Kunde" ist jahresunabhängig (siehe zieheKundennummer()) - Jahr-Feld beim
-                    // Anlegen auf 0 fixieren und Standard-Format vorschlagen.
                     const nkStandardFormate = { rechnung: 'RE-{JJJJ}-{NNNN}', angebot: 'AN-{JJJJ}-{NNNN}', auftrag: 'AU-{JJJJ}-{NNNN}', kunde: 'K-{NNNN}' };
                     const nkSchluesselSelect = document.getElementById('nk_schluessel');
-                    const nkJahrFeld = document.getElementById('nk_jahr');
-                    const nkJahrHinweis = document.getElementById('nk_jahr_hinweis');
                     const nkFormatFeld = document.getElementById('nk_format');
-                    function nkSchluesselGeaendert() {
-                        if (!nkSchluesselSelect || !nkJahrFeld) return;
-                        const istKunde = nkSchluesselSelect.value === 'kunde';
+                    nkSchluesselSelect?.addEventListener('change', function () {
                         if (Object.values(nkStandardFormate).includes(nkFormatFeld.value)) {
                             nkFormatFeld.value = nkStandardFormate[nkSchluesselSelect.value] || nkFormatFeld.value;
                         }
-                        if (istKunde) {
-                            nkJahrFeld.dataset.vorherigerWert = nkJahrFeld.dataset.vorherigerWert || nkJahrFeld.value;
-                            nkJahrFeld.value = '0';
-                            nkJahrFeld.readOnly = true;
-                        } else {
-                            nkJahrFeld.readOnly = false;
-                            if (nkJahrFeld.dataset.vorherigerWert) nkJahrFeld.value = nkJahrFeld.dataset.vorherigerWert;
-                        }
-                        if (nkJahrHinweis) nkJahrHinweis.style.display = istKunde ? '' : 'none';
                         nkAktualisiereVorschau();
-                    }
-                    nkSchluesselSelect?.addEventListener('change', nkSchluesselGeaendert);
+                    });
                 </script>
                 <?php else: ?>
                 <div class="card">
@@ -1338,14 +1314,13 @@ $e1aKennzahlen = [
                         <a href="?tab=nummernkreise&action=new" class="btn btn-light btn-sm">+ Neu</a>
                     </div>
                     <table class="table table-hover mb-0">
-                        <thead><tr><th>Dokumenttyp</th><th class="text-center">Jahr</th><th>Format</th><th class="text-center">Nächste Nummer</th><th>Vorschau</th><th></th></tr></thead>
+                        <thead><tr><th>Dokumenttyp</th><th>Format</th><th class="text-center">Nächste Nummer</th><th>Vorschau</th><th></th></tr></thead>
                         <tbody>
                         <?php if (empty($nummernkreise)): ?>
-                        <tr><td colspan="6" class="text-center text-muted py-4">Noch keine Nummernkreise vorhanden</td></tr>
+                        <tr><td colspan="5" class="text-center text-muted py-4">Noch keine Nummernkreise vorhanden</td></tr>
                         <?php else: foreach ($nummernkreise as $nk): ?>
                         <tr>
                             <td><?= $nummernkreisSchluesselLabels[$nk['schluessel']] ?? htmlspecialchars($nk['schluessel']) ?></td>
-                            <td class="text-center"><?= $nk['schluessel'] === 'kunde' ? '<span class="text-muted">kein Jahresbezug</span>' : $nk['jahr'] ?></td>
                             <td><code><?= htmlspecialchars($nk['format']) ?></code></td>
                             <td class="text-center"><span class="badge bg-primary"><?= $nk['naechste_nummer'] ?></span></td>
                             <td><code><?= htmlspecialchars(formatiereNummernkreisNummer($nk['format'], date('Y-m-d'), $nk['naechste_nummer'])) ?></code></td>
@@ -1359,9 +1334,9 @@ $e1aKennzahlen = [
                 </div>
                 <div class="alert alert-info mt-3">
                     <i class="bi bi-info-circle me-1"></i>
-                    Für jedes Jahr wird beim ersten Finalisieren eines Dokumenttyps automatisch ein neuer Nummernkreis
-                    angelegt (Standard-Format <code>RE-{JJJJ}-{NNNN}</code>, Start bei 1), falls noch keiner existiert.
-                    Hier kannst du Format und Startwert pro Jahr im Voraus selbst festlegen oder nachträglich korrigieren.
+                    Format und Startwert werden einmal pro Dokumenttyp eingestellt. Enthält das Format einen
+                    Jahres-Platzhalter (<code>{JJJJ}</code>/<code>{JJ}</code>), beginnt die Nummer beim ersten Beleg
+                    eines neuen Jahres automatisch wieder bei 1 - sonst läuft sie unbegrenzt weiter.
                 </div>
                 <?php endif; ?>
 

@@ -901,8 +901,11 @@ function formatiereNummernkreisNummer($format, $datum, $laufendeNummer) {
 /**
  * Zieht die nächste Nummer aus einem Nummernkreis (SELECT ... FOR UPDATE - verhindert
  * doppelte Nummern bei gleichzeitigen Finalisierungen). Muss innerhalb einer bereits
- * offenen Transaktion aufgerufen werden. Legt den Nummernkreis für schluessel+jahr mit
- * Standardformat an, falls er noch nicht existiert.
+ * offenen Transaktion aufgerufen werden. Es gibt nur noch eine Zeile pro schluessel (nicht
+ * mehr pro Jahr) - falls noch keine existiert (z.B. ganz neue Installation), wird sie einmalig
+ * mit einem Standardformat angelegt. Ob der Zähler bei einem Jahreswechsel auf 1 zurückspringt,
+ * entscheidet ausschließlich das eingestellte Format: enthält es {JJJJ} oder {JJ}, wird beim
+ * ersten Beleg eines neuen Jahres zurückgesetzt, sonst läuft er unbegrenzt weiter.
  */
 function zieheNummernkreisNummer($schluessel, $jahr, $datum) {
     $db = db();
@@ -913,19 +916,23 @@ function zieheNummernkreisNummer($schluessel, $jahr, $datum) {
         'kunde' => 'K-{NNNN}',
     ];
 
-    $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE schluessel = ? AND jahr = ? FOR UPDATE");
-    $stmt->execute([$schluessel, $jahr]);
+    $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE schluessel = ? FOR UPDATE");
+    $stmt->execute([$schluessel]);
     $kreis = $stmt->fetch();
     if (!$kreis) {
         $db->prepare("INSERT INTO nummernkreise (schluessel, jahr, format, naechste_nummer) VALUES (?, ?, ?, 1)")
            ->execute([$schluessel, $jahr, $standardFormate[$schluessel] ?? '{JJJJ}-{NNNN}']);
-        $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE schluessel = ? AND jahr = ? FOR UPDATE");
-        $stmt->execute([$schluessel, $jahr]);
+        $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE schluessel = ? FOR UPDATE");
+        $stmt->execute([$schluessel]);
         $kreis = $stmt->fetch();
     }
 
-    $nummer = formatiereNummernkreisNummer($kreis['format'], $datum, $kreis['naechste_nummer']);
-    $db->prepare("UPDATE nummernkreise SET naechste_nummer = naechste_nummer + 1 WHERE id = ?")->execute([$kreis['id']]);
+    $hatJahresplatzhalter = strpos($kreis['format'], '{JJJJ}') !== false || strpos($kreis['format'], '{JJ}') !== false;
+    $laufendeNummer = ($hatJahresplatzhalter && (int) $kreis['jahr'] !== (int) $jahr) ? 1 : (int) $kreis['naechste_nummer'];
+
+    $nummer = formatiereNummernkreisNummer($kreis['format'], $datum, $laufendeNummer);
+    $db->prepare("UPDATE nummernkreise SET naechste_nummer = ?, jahr = ? WHERE id = ?")
+       ->execute([$laufendeNummer + 1, $jahr, $kreis['id']]);
     return $nummer;
 }
 

@@ -61,6 +61,7 @@ const MIGRATIONS_REIHENFOLGE = [
     'add_paperless_einstellungen.sql',          // unabhängig, eigene neue Tabelle
     'add_nachrichten.sql',                      // unabhängig, eigene neue Tabelle (nur FK auf benutzer)
     'add_aufgaben.sql',                         // braucht kunden + verkaufsdokumente (FK)
+    'add_nummernkreis_einmalig.sql',            // braucht nummernkreise (add_verkauf_module.sql)
 ];
 
 function fuehreAusstehendeMigrationenAus() {
