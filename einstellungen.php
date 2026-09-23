@@ -1925,15 +1925,20 @@ $e1aKennzahlen = [
                         $anlagenCount = $db->query("SELECT COUNT(*) FROM anlagegueter")->fetchColumn();
                         $e1aCount = $db->query("SELECT COUNT(*) FROM einkommensteuer")->fetchColumn();
                         $u30Count = $db->query("SELECT COUNT(*) FROM ust_voranmeldungen")->fetchColumn();
+                        // shields.io-Static-Badges verwenden "-" als Trennzeichen zwischen
+                        // Label/Nachricht/Farbe - eigene "-"/"_" im Wert (z.B. MySQL-Versionsstring
+                        // oder ein "git describe"-Ergebnis wie "v1.1.3-2-gabc1234") müssen escaped
+                        // werden, sonst liefert shields.io ein "badge not found".
+                        $shieldsEscape = fn($text) => str_replace(' ', '_', str_replace('-', '--', str_replace('_', '__', (string) $text)));
                         ?>
                         <div class="row">
                             <div class="col-md-6">
                                 <table class="table table-sm">
                                     <!-- <tr><td>PHP Version</td><td><code><?= phpversion() ?></code></td></tr> -->
-                                    <tr><td>PHP Version</td><td><img src="https://img.shields.io/badge/PHP-<?= phpversion() ?>-blue" alt=""></td></tr>
+                                    <tr><td>PHP Version</td><td><img src="https://img.shields.io/badge/PHP-<?= $shieldsEscape(phpversion()) ?>-blue" alt=""></td></tr>
                                     <!-- <tr><td>MySQL Version</td><td><code><?= $db->query("SELECT VERSION()")->fetchColumn() ?></code></td></tr> -->
-                                    <tr><td>MySQL Version</td><td><img src="https://img.shields.io/badge/MySQL-<?= $db->query("SELECT VERSION()")->fetchColumn() ?>-777BB4" alt=""></td></tr>
-                                    <tr><td>EKassa360 Version</td><td><img src="https://img.shields.io/badge/Version-<?= urlencode($gitInfo['version'] ?? 'unbekannt') ?>-lightgreen" alt=""></td></tr>
+                                    <tr><td>MySQL Version</td><td><img src="https://img.shields.io/badge/MySQL-<?= $shieldsEscape($db->query("SELECT VERSION()")->fetchColumn()) ?>-777BB4" alt=""></td></tr>
+                                    <tr><td>EKassa360 Version</td><td><img src="https://img.shields.io/badge/Version-<?= $shieldsEscape($gitInfo['version'] ?? 'unbekannt') ?>-lightgreen" alt=""></td></tr>
                                     <tr><td>EKassa360 auf Github</td><td><img src="https://img.shields.io/github/v/release/Hanner72/ekassa360?include_prereleases" alt=""></td></tr>
                                 </table>
                             </div>
