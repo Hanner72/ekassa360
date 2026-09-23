@@ -7,9 +7,17 @@ $baseDir = dirname($vendorDir);
 
 return array(
     'ZipStream\\' => array($vendorDir . '/maennchen/zipstream-php/src'),
+    'Svg\\' => array($vendorDir . '/dompdf/php-svg-lib/src/Svg'),
+    'Sabberworm\\CSS\\' => array($vendorDir . '/sabberworm/php-css-parser/src'),
     'Psr\\SimpleCache\\' => array($vendorDir . '/psr/simple-cache/src'),
     'PhpOffice\\PhpSpreadsheet\\' => array($vendorDir . '/phpoffice/phpspreadsheet/src/PhpSpreadsheet'),
+    'PHPMailer\\PHPMailer\\' => array($vendorDir . '/phpmailer/phpmailer/src'),
+    'Mike42\\' => array($vendorDir . '/mike42/gfx-php/src/Mike42', $vendorDir . '/mike42/escpos-php/src/Mike42'),
     'Matrix\\' => array($vendorDir . '/markbaker/matrix/classes/src'),
+    'Masterminds\\' => array($vendorDir . '/masterminds/html5/src'),
+    'FontLib\\' => array($vendorDir . '/dompdf/php-font-lib/src/FontLib'),
+    'EKassa360\\' => array($baseDir . '/src'),
+    'Dompdf\\' => array($vendorDir . '/dompdf/dompdf/src'),
     'Composer\\Pcre\\' => array($vendorDir . '/composer/pcre/src'),
     'Complex\\' => array($vendorDir . '/markbaker/complex/classes/src'),
 );

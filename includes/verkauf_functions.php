@@ -1,0 +1,1392 @@
+<?php
+/**
+ * Verkauf-Modul: Kunden, Artikel, Angebote/Aufträge/Rechnungen, Finalisierung, Storno
+ *
+ * Die Ledger-Tabelle `rechnungen` (U30/E1a-Grundlage) bleibt die einzige Quelle für
+ * Steuerberechnung und Zahlungsstatus. Dieses Modul schreibt dort nur über die
+ * bestehende saveRechnung()/updateRechnungZahlung()-Funktion (includes/functions.php).
+ */
+
+// ============================================
+// KUNDEN
+// ============================================
+
+function kundenAnzeigename($kunde) {
+    if (!empty($kunde['firma_name'])) return $kunde['firma_name'];
+    return trim(($kunde['vorname'] ?? '') . ' ' . ($kunde['nachname'] ?? ''));
+}
+
+/**
+ * Tooltip-Text für den "Per E-Mail versenden"-Button: zeigt bei bereits versendeten
+ * Dokumenten Datum/Empfänger des letzten Versands (verkaufsdokumente.versendet_am/_an).
+ */
+function versandButtonTitle($doc) {
+    if (!empty($doc['versendet_am'])) {
+        return 'Per E-Mail gesendet am ' . formatDatum($doc['versendet_am']) . ' an ' . $doc['versendet_an'] . ' - erneut versenden';
+    }
+    return 'Per E-Mail versenden';
+}
+
+function getAlleKunden($nurAktiv = true) {
+    $db = db();
+    $sql = "SELECT * FROM kunden";
+    if ($nurAktiv) $sql .= " WHERE aktiv = 1";
+    $sql .= " ORDER BY firma_name, nachname, vorname";
+    return $db->query($sql)->fetchAll();
+}
+
+function getKunde($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT * FROM kunden WHERE id = ?");
+    $stmt->execute([$id]);
+    return $stmt->fetch();
+}
+
+function saveKunde($data) {
+    $db = db();
+
+    $kundennummer = $data['kundennummer'] ?? null;
+    $firmaName = $data['firma_name'] ?? null;
+    $anrede = $data['anrede'] ?? null;
+    $vorname = $data['vorname'] ?? null;
+    $nachname = $data['nachname'] ?? null;
+    $strasse = $data['strasse'] ?? null;
+    $plz = $data['plz'] ?? null;
+    $ort = $data['ort'] ?? null;
+    $land = ($data['land'] ?? null) ?: 'Österreich';
+    $uidNummer = $data['uid_nummer'] ?? null;
+    $email = $data['email'] ?? null;
+    $telefon = $data['telefon'] ?? null;
+    $notizen = $data['notizen'] ?? null;
+    $aktiv = $data['aktiv'] ?? 1;
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE kunden SET
+            kundennummer=?, firma_name=?, anrede=?, vorname=?, nachname=?, strasse=?, plz=?, ort=?, land=?,
+            uid_nummer=?, email=?, telefon=?, notizen=?, aktiv=?
+            WHERE id=?");
+        $result = $stmt->execute([
+            $kundennummer ?: null, $firmaName ?: null, $anrede ?: null,
+            $vorname ?: null, $nachname ?: null, $strasse ?: null,
+            $plz ?: null, $ort ?: null, $land,
+            $uidNummer ?: null, $email ?: null, $telefon ?: null,
+            $notizen ?: null, $aktiv,
+            $data['id']
+        ]);
+        if ($result && function_exists('logAction')) {
+            logAction('kunden', $data['id'], 'geaendert', 'Kunde bearbeitet: ' . kundenAnzeigename($data));
+        }
+        return $result;
+    }
+
+    $benutzer_id = $_SESSION['benutzer_id'] ?? null;
+
+    // Neuer Kunde ohne manuell angegebene Kundennummer: automatisch aus dem Nummernkreis
+    // ziehen (siehe zieheKundennummer() - jahresunabhängig, anders als Angebot/Auftrag/Rechnung).
+    $db->beginTransaction();
+    try {
+        if (empty($kundennummer)) {
+            $kundennummer = zieheKundennummer();
+        }
+        $stmt = $db->prepare("INSERT INTO kunden
+            (kundennummer, firma_name, anrede, vorname, nachname, strasse, plz, ort, land, uid_nummer, email, telefon, notizen, aktiv, erstellt_von)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $kundennummer, $firmaName ?: null, $anrede ?: null,
+            $vorname ?: null, $nachname ?: null, $strasse ?: null,
+            $plz ?: null, $ort ?: null, $land,
+            $uidNummer ?: null, $email ?: null, $telefon ?: null,
+            $notizen ?: null, $aktiv, $benutzer_id
+        ]);
+        $id = $db->lastInsertId();
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        throw $e;
+    }
+
+    if ($id && function_exists('logAction')) {
+        logAction('kunden', $id, 'erstellt', 'Kunde erstellt: ' . kundenAnzeigename($data));
+    }
+    return $id;
+}
+
+function toggleKundeAktiv($id) {
+    $db = db();
+    $stmt = $db->prepare("UPDATE kunden SET aktiv = NOT aktiv WHERE id = ?");
+    return $stmt->execute([$id]);
+}
+
+/**
+ * IDs aller Kunden, zu denen bereits mindestens ein Angebot/Auftrag/Rechnung existiert -
+ * für die Liste (Löschen-Button ausblenden) und als Sperre in deleteKunde().
+ */
+function getKundenIdsMitVerkaufsdokumenten() {
+    $db = db();
+    return $db->query("SELECT DISTINCT kunde_id FROM verkaufsdokumente WHERE kunde_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+}
+
+/**
+ * Kunde löschen - nur erlaubt, wenn noch keine Angebote/Aufträge/Rechnungen zu diesem
+ * Kunden bestehen (die Fremdschlüssel dort sind ON DELETE SET NULL, würden also beim
+ * Löschen sonst stillschweigend von echten Belegen abgekoppelt).
+ */
+function deleteKunde($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM verkaufsdokumente WHERE kunde_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Kunde kann nicht gelöscht werden - es bestehen bereits Angebote, Aufträge oder Rechnungen zu diesem Kunden. Bitte stattdessen deaktivieren.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM kunden WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('kunden', $id, 'geloescht', 'Kunde gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
+// ARTIKEL
+// ============================================
+
+function getAlleArtikel($nurAktiv = true) {
+    $db = db();
+    $sql = "SELECT a.*, u.satz AS ust_prozent, u.bezeichnung AS ust_bezeichnung, k.name AS kategorie_name,
+                   g.name AS artikelgruppe_name, g.kurzbezeichnung AS artikelgruppe_kurz,
+                   ug.name AS artikeluntergruppe_name, ug.kurzbezeichnung AS artikeluntergruppe_kurz
+            FROM artikel a
+            LEFT JOIN ust_saetze u ON a.ust_satz_id = u.id
+            LEFT JOIN kategorien k ON a.kategorie_id = k.id
+            LEFT JOIN artikelgruppen g ON a.artikelgruppe_id = g.id
+            LEFT JOIN artikeluntergruppen ug ON a.artikeluntergruppe_id = ug.id";
+    if ($nurAktiv) $sql .= " WHERE a.aktiv = 1";
+    $sql .= " ORDER BY a.artikelnummer ASC";
+    return $db->query($sql)->fetchAll();
+}
+
+function getArtikel($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT * FROM artikel WHERE id = ?");
+    $stmt->execute([$id]);
+    return $stmt->fetch();
+}
+
+function saveArtikel($data) {
+    $db = db();
+
+    $artikelnummer = $data['artikelnummer'] ?? null;
+    $beschreibung = $data['beschreibung'] ?? null;
+    $einheit = ($data['einheit'] ?? null) ?: 'Stk';
+    $ustSatzId = $data['ust_satz_id'] ?? null;
+    $kategorieId = $data['kategorie_id'] ?? null;
+    $artikelgruppeId = $data['artikelgruppe_id'] ?? null;
+    $artikeluntergruppeId = $data['artikeluntergruppe_id'] ?? null;
+    $aktiv = $data['aktiv'] ?? 1;
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE artikel SET
+            artikelnummer=?, bezeichnung=?, beschreibung=?, einheit=?, einzelpreis_netto=?, ust_satz_id=?, kategorie_id=?, artikelgruppe_id=?, artikeluntergruppe_id=?, aktiv=?
+            WHERE id=?");
+        $result = $stmt->execute([
+            $artikelnummer ?: null, $data['bezeichnung'], $beschreibung ?: null,
+            $einheit, $data['einzelpreis_netto'], $ustSatzId ?: null,
+            $kategorieId ?: null, $artikelgruppeId ?: null, $artikeluntergruppeId ?: null, $aktiv, $data['id']
+        ]);
+        if ($result && function_exists('logAction')) {
+            logAction('artikel', $data['id'], 'geaendert', 'Artikel bearbeitet: ' . $data['bezeichnung']);
+        }
+        return $result;
+    }
+
+    // Neuer Artikel ohne manuell angegebene Artikelnummer: automatisch aus dem Nummernkreis
+    // ziehen (siehe zieheArtikelnummer() - jahresunabhängig, Kurzbezeichnungen von Artikelgruppe
+    // {KURZ} und Artikeluntergruppe {UKURZ} fließen ins Format ein - NICHT die Buchungs-Kategorie).
+    $db->beginTransaction();
+    try {
+        if (empty($artikelnummer)) {
+            $artikelnummer = zieheArtikelnummer($artikelgruppeId ?: null, $artikeluntergruppeId ?: null);
+        }
+        $stmt = $db->prepare("INSERT INTO artikel
+            (artikelnummer, bezeichnung, beschreibung, einheit, einzelpreis_netto, ust_satz_id, kategorie_id, artikelgruppe_id, artikeluntergruppe_id, aktiv)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $artikelnummer, $data['bezeichnung'], $beschreibung ?: null,
+            $einheit, $data['einzelpreis_netto'], $ustSatzId ?: null,
+            $kategorieId ?: null, $artikelgruppeId ?: null, $artikeluntergruppeId ?: null, $aktiv
+        ]);
+        $id = $db->lastInsertId();
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        throw $e;
+    }
+
+    if ($id && function_exists('logAction')) {
+        logAction('artikel', $id, 'erstellt', 'Artikel erstellt: ' . $data['bezeichnung']);
+    }
+    return $id;
+}
+
+function toggleArtikelAktiv($id) {
+    $db = db();
+    $stmt = $db->prepare("UPDATE artikel SET aktiv = NOT aktiv WHERE id = ?");
+    return $stmt->execute([$id]);
+}
+
+/**
+ * IDs aller Artikel, die bereits in mindestens einer Angebots-/Auftrags-/Rechnungsposition
+ * verwendet werden - für die Liste (Löschen-Button ausblenden) und als Sperre in
+ * deleteArtikel().
+ */
+function getArtikelIdsInVerwendung() {
+    $db = db();
+    return $db->query("SELECT DISTINCT artikel_id FROM verkaufsdokument_positionen WHERE artikel_id IS NOT NULL")->fetchAll(PDO::FETCH_COLUMN);
+}
+
+/**
+ * Artikel löschen - nur erlaubt, wenn er noch in keiner Angebots-/Auftrags-/Rechnungsposition
+ * verwendet wird (die Fremdschlüssel-Spalte verkaufsdokument_positionen.artikel_id ist
+ * ON DELETE SET NULL, würde also sonst bestehende Positionen stillschweigend vom Artikel
+ * abkoppeln).
+ */
+function deleteArtikel($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM verkaufsdokument_positionen WHERE artikel_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Artikel kann nicht gelöscht werden - er wird bereits in einem Angebot, Auftrag oder einer Rechnung verwendet. Bitte stattdessen deaktivieren.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM artikel WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('artikel', $id, 'geloescht', 'Artikel gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
+// ARTIKELGRUPPEN (rein organisatorisch, z.B. "T-Shirts", "Hoodies" - unabhängig von den
+// Buchungs-Kategorien in kategorien/E1a)
+// ============================================
+
+function getAlleArtikelgruppen($nurAktiv = true) {
+    $db = db();
+    $sql = "SELECT * FROM artikelgruppen";
+    if ($nurAktiv) $sql .= " WHERE aktiv = 1";
+    $sql .= " ORDER BY name";
+    return $db->query($sql)->fetchAll();
+}
+
+function saveArtikelgruppe($data) {
+    $db = db();
+    $name = trim($data['name'] ?? '');
+    $kurz = trim($data['kurzbezeichnung'] ?? '') ?: null;
+    $aktiv = $data['aktiv'] ?? 1;
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE artikelgruppen SET name=?, kurzbezeichnung=?, aktiv=? WHERE id=?");
+        $stmt->execute([$name, $kurz, $aktiv, $data['id']]);
+        return $data['id'];
+    }
+
+    $stmt = $db->prepare("INSERT INTO artikelgruppen (name, kurzbezeichnung, aktiv) VALUES (?, ?, ?)");
+    $stmt->execute([$name, $kurz, $aktiv]);
+    return $db->lastInsertId();
+}
+
+/**
+ * Artikelgruppen inkl. Anzahl zugeordneter Artikel - für die Verwaltungsliste (Löschen nur
+ * möglich, wenn kein Artikel mehr in dieser Gruppe ist, siehe deleteArtikelgruppe()).
+ */
+function getAlleArtikelgruppenMitAnzahl() {
+    $db = db();
+    return $db->query("SELECT g.*, COUNT(a.id) AS anzahl_artikel
+                        FROM artikelgruppen g
+                        LEFT JOIN artikel a ON a.artikelgruppe_id = g.id
+                        GROUP BY g.id
+                        ORDER BY g.kurzbezeichnung ASC")->fetchAll();
+}
+
+/**
+ * Artikelgruppe löschen - nur erlaubt, wenn ihr kein Artikel mehr angehört, weder direkt
+ * noch über eine ihrer Untergruppen (die Fremdschlüssel sind ON DELETE SET NULL/CASCADE,
+ * würden also sonst bestehende Artikel/Untergruppen stillschweigend abkoppeln).
+ */
+function deleteArtikelgruppe($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM artikel
+        WHERE artikelgruppe_id = ?
+        OR artikeluntergruppe_id IN (SELECT id FROM artikeluntergruppen WHERE artikelgruppe_id = ?)");
+    $stmt->execute([$id, $id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Artikelgruppe kann nicht gelöscht werden - es sind noch Artikel zugeordnet (auch über eine Untergruppe).'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM artikelgruppen WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('artikelgruppen', $id, 'geloescht', 'Artikelgruppe gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
+// ARTIKELUNTERGRUPPEN (zweite Ebene unter Artikelgruppen, z.B. Gruppe "Textilien" ->
+// Untergruppen "T-Shirts", "Hoodies")
+// ============================================
+
+function getAlleArtikeluntergruppen($artikelgruppeId = null, $nurAktiv = true) {
+    $db = db();
+    $where = [];
+    $params = [];
+    if ($artikelgruppeId) {
+        $where[] = "artikelgruppe_id = ?";
+        $params[] = $artikelgruppeId;
+    }
+    if ($nurAktiv) {
+        $where[] = "aktiv = 1";
+    }
+    $sql = "SELECT * FROM artikeluntergruppen";
+    if ($where) $sql .= " WHERE " . implode(' AND ', $where);
+    $sql .= " ORDER BY kurzbezeichnung ASC";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+function saveArtikeluntergruppe($data) {
+    $db = db();
+    $name = trim($data['name'] ?? '');
+    $kurz = trim($data['kurzbezeichnung'] ?? '') ?: null;
+    $gruppeId = $data['artikelgruppe_id'] ?? null;
+    $aktiv = $data['aktiv'] ?? 1;
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE artikeluntergruppen SET name=?, kurzbezeichnung=?, aktiv=? WHERE id=?");
+        $stmt->execute([$name, $kurz, $aktiv, $data['id']]);
+        return $data['id'];
+    }
+
+    $stmt = $db->prepare("INSERT INTO artikeluntergruppen (artikelgruppe_id, name, kurzbezeichnung, aktiv) VALUES (?, ?, ?, ?)");
+    $stmt->execute([$gruppeId, $name, $kurz, $aktiv]);
+    return $db->lastInsertId();
+}
+
+/**
+ * Artikeluntergruppen inkl. übergeordneter Gruppe und Anzahl zugeordneter Artikel - für die
+ * Verwaltungsliste (Löschen/Bearbeiten nur möglich, wenn kein Artikel mehr in dieser
+ * Untergruppe ist, siehe deleteArtikeluntergruppe()).
+ */
+function getAlleArtikeluntergruppenMitAnzahl() {
+    $db = db();
+    return $db->query("SELECT u.*, g.name AS gruppe_name, g.kurzbezeichnung AS gruppe_kurz,
+                               COUNT(a.id) AS anzahl_artikel
+                        FROM artikeluntergruppen u
+                        JOIN artikelgruppen g ON u.artikelgruppe_id = g.id
+                        LEFT JOIN artikel a ON a.artikeluntergruppe_id = u.id
+                        GROUP BY u.id
+                        ORDER BY g.kurzbezeichnung ASC, u.kurzbezeichnung ASC")->fetchAll();
+}
+
+/**
+ * Artikeluntergruppe löschen - nur erlaubt, wenn ihr kein Artikel mehr angehört.
+ */
+function deleteArtikeluntergruppe($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM artikel WHERE artikeluntergruppe_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Artikeluntergruppe kann nicht gelöscht werden - es sind noch Artikel zugeordnet.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM artikeluntergruppen WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('artikeluntergruppen', $id, 'geloescht', 'Artikeluntergruppe gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
+// FIRMENPROFILE (mehrere Marken-Namen + Logos, z.B. bei mehreren Firmenzweigen -
+// auswählbar pro Angebot/Auftrag/Rechnung, siehe baueDokumentPlatzhalter() in
+// includes/verkauf_pdf.php). Adresse/UID/IBAN/Bank bleiben bewusst bei der einzigen
+// `firma`-Tabelle - nur Name+Logo sind pro Profil unterschiedlich.
+// ============================================
+
+function getAlleFirmenprofile($nurAktiv = true) {
+    $db = db();
+    $sql = "SELECT * FROM firmenprofile";
+    if ($nurAktiv) $sql .= " WHERE aktiv = 1";
+    $sql .= " ORDER BY ist_standard DESC, name";
+    return $db->query($sql)->fetchAll();
+}
+
+function getFirmenprofil($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT * FROM firmenprofile WHERE id = ?");
+    $stmt->execute([$id]);
+    return $stmt->fetch();
+}
+
+function getStandardFirmenprofil() {
+    $db = db();
+    return $db->query("SELECT * FROM firmenprofile WHERE ist_standard = 1 LIMIT 1")->fetch();
+}
+
+/**
+ * $data['logo_upload'] optional: Roh-Bytes eines neu hochgeladenen Logos (bereits per
+ * getimagesizefromstring() validiert vom Aufrufer, wie beim bestehenden Firma-Logo-Upload
+ * in einstellungen.php) + $data['logo_mime']. Ohne logo_upload bleibt ein vorhandenes Logo
+ * beim Bearbeiten erhalten, außer $data['logo_entfernen'] ist gesetzt.
+ */
+function saveFirmenprofil($data) {
+    $db = db();
+    $name = trim($data['name'] ?? '');
+    $istStandard = !empty($data['ist_standard']) ? 1 : 0;
+    $aktiv = $data['aktiv'] ?? 1;
+    $farbe1 = preg_match('/^#[0-9a-fA-F]{6}$/', $data['farbe1'] ?? '') ? $data['farbe1'] : '#0d6efd';
+    $farbe2 = preg_match('/^#[0-9a-fA-F]{6}$/', $data['farbe2'] ?? '') ? $data['farbe2'] : '#6c757d';
+
+    $logoData = null;
+    $logoMime = null;
+    if (!empty($data['id'])) {
+        $bestehend = getFirmenprofil($data['id']);
+        $logoData = $bestehend['logo_data'] ?? null;
+        $logoMime = $bestehend['logo_mime'] ?? null;
+    }
+    if (!empty($data['logo_entfernen'])) {
+        $logoData = null;
+        $logoMime = null;
+    } elseif (!empty($data['logo_upload'])) {
+        $logoData = base64_encode($data['logo_upload']);
+        $logoMime = $data['logo_mime'];
+    }
+
+    if ($istStandard) {
+        $db->exec("UPDATE firmenprofile SET ist_standard = 0");
+    }
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE firmenprofile SET name=?, logo_data=?, logo_mime=?, farbe1=?, farbe2=?, ist_standard=?, aktiv=? WHERE id=?");
+        $stmt->execute([$name, $logoData, $logoMime, $farbe1, $farbe2, $istStandard, $aktiv, $data['id']]);
+        if (function_exists('logAction')) {
+            logAction('firmenprofile', $data['id'], 'geaendert', 'Firmenprofil bearbeitet: ' . $name);
+        }
+        return $data['id'];
+    }
+
+    $stmt = $db->prepare("INSERT INTO firmenprofile (name, logo_data, logo_mime, farbe1, farbe2, ist_standard, aktiv) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute([$name, $logoData, $logoMime, $farbe1, $farbe2, $istStandard, $aktiv]);
+    $id = $db->lastInsertId();
+    if ($id && function_exists('logAction')) {
+        logAction('firmenprofile', $id, 'erstellt', 'Firmenprofil erstellt: ' . $name);
+    }
+    return $id;
+}
+
+/**
+ * Firmenprofil löschen - nur erlaubt, wenn es keinem Verkaufsdokument mehr zugeordnet ist
+ * (die Fremdschlüssel-Spalte ist ON DELETE SET NULL, würde also sonst bestehende
+ * Angebote/Aufträge/Rechnungen stillschweigend auf das Standard-Profil zurückfallen lassen).
+ */
+function deleteFirmenprofil($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM verkaufsdokumente WHERE firmenprofil_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Firmenprofil kann nicht gelöscht werden - es sind noch Dokumente zugeordnet.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM firmenprofile WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('firmenprofile', $id, 'geloescht', 'Firmenprofil gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
+// ZAHLUNGSBEDINGUNGEN (nur Verkaufsrechnungen) - Bezeichnung + optionaler Fälligkeits-
+// Vorschlag (tage_bis_faellig) + frei gestaltbarer Zahlungshinweis-Text fürs PDF.
+// ============================================
+
+function getAlleZahlungsbedingungen($nurAktiv = true) {
+    $db = db();
+    $sql = "SELECT * FROM zahlungsbedingungen";
+    if ($nurAktiv) $sql .= " WHERE aktiv = 1";
+    $sql .= " ORDER BY ist_standard DESC, bezeichnung";
+    return $db->query($sql)->fetchAll();
+}
+
+function getZahlungsbedingung($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT * FROM zahlungsbedingungen WHERE id = ?");
+    $stmt->execute([$id]);
+    return $stmt->fetch();
+}
+
+function getStandardZahlungsbedingung() {
+    $db = db();
+    return $db->query("SELECT * FROM zahlungsbedingungen WHERE ist_standard = 1 LIMIT 1")->fetch();
+}
+
+function saveZahlungsbedingung($data) {
+    $db = db();
+    $bezeichnung = trim($data['bezeichnung'] ?? '');
+    $tageBisFaellig = ($data['tage_bis_faellig'] ?? '') !== '' ? (int)$data['tage_bis_faellig'] : null;
+    $skontoProzent = ($data['skonto_prozent'] ?? '') !== '' ? floatval(str_replace(',', '.', $data['skonto_prozent'])) : null;
+    $skontoTage = ($data['skonto_tage'] ?? '') !== '' ? (int)$data['skonto_tage'] : null;
+    $zahlungshinweisText = trim($data['zahlungshinweis_text'] ?? '') ?: null;
+    $istStandard = !empty($data['ist_standard']) ? 1 : 0;
+    $aktiv = $data['aktiv'] ?? 1;
+
+    if ($istStandard) {
+        $db->exec("UPDATE zahlungsbedingungen SET ist_standard = 0");
+    }
+
+    if (!empty($data['id'])) {
+        $stmt = $db->prepare("UPDATE zahlungsbedingungen SET bezeichnung=?, tage_bis_faellig=?, skonto_prozent=?, skonto_tage=?, zahlungshinweis_text=?, ist_standard=?, aktiv=? WHERE id=?");
+        $stmt->execute([$bezeichnung, $tageBisFaellig, $skontoProzent, $skontoTage, $zahlungshinweisText, $istStandard, $aktiv, $data['id']]);
+        if (function_exists('logAction')) {
+            logAction('zahlungsbedingungen', $data['id'], 'geaendert', 'Zahlungsbedingung bearbeitet: ' . $bezeichnung);
+        }
+        return $data['id'];
+    }
+
+    $stmt = $db->prepare("INSERT INTO zahlungsbedingungen (bezeichnung, tage_bis_faellig, skonto_prozent, skonto_tage, zahlungshinweis_text, ist_standard, aktiv) VALUES (?, ?, ?, ?, ?, ?, ?)");
+    $stmt->execute([$bezeichnung, $tageBisFaellig, $skontoProzent, $skontoTage, $zahlungshinweisText, $istStandard, $aktiv]);
+    $id = $db->lastInsertId();
+    if ($id && function_exists('logAction')) {
+        logAction('zahlungsbedingungen', $id, 'erstellt', 'Zahlungsbedingung erstellt: ' . $bezeichnung);
+    }
+    return $id;
+}
+
+/**
+ * Löschen nur erlaubt, wenn keine Verkaufsrechnung (mehr) darauf verweist (die
+ * Fremdschlüssel-Spalte ist ON DELETE SET NULL, würde sonst bestehende Rechnungen
+ * stillschweigend ihrer Zahlungsbedingung berauben).
+ */
+function deleteZahlungsbedingung($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT COUNT(*) FROM verkaufsdokumente WHERE zahlungsbedingung_id = ?");
+    $stmt->execute([$id]);
+    if ($stmt->fetchColumn() > 0) {
+        return ['success' => false, 'message' => 'Zahlungsbedingung kann nicht gelöscht werden - es sind noch Rechnungen zugeordnet.'];
+    }
+
+    $stmt = $db->prepare("DELETE FROM zahlungsbedingungen WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('zahlungsbedingungen', $id, 'geloescht', 'Zahlungsbedingung gelöscht');
+    }
+    return ['success' => $result];
+}
+
+// ============================================
+// VERKAUFSDOKUMENTE (Angebot/Auftrag/Rechnung) - CRUD (nur Entwürfe editierbar)
+// ============================================
+
+function getVerkaufsdokumente($typ, $filters = []) {
+    $db = db();
+    $where = ["v.typ = ?"];
+    $params = [$typ];
+
+    if (!empty($filters['jahr'])) {
+        $where[] = "YEAR(v.datum) = ?";
+        $params[] = $filters['jahr'];
+    }
+    if (!empty($filters['status'])) {
+        $where[] = "v.status = ?";
+        $params[] = $filters['status'];
+    }
+    if (!empty($filters['kunde_id'])) {
+        $where[] = "v.kunde_id = ?";
+        $params[] = $filters['kunde_id'];
+    }
+    if (!empty($filters['suche'])) {
+        $s = '%' . $filters['suche'] . '%';
+        $where[] = "(v.nummer LIKE ? OR v.betreff LIKE ? OR k.firma_name LIKE ? OR k.nachname LIKE ?)";
+        array_push($params, $s, $s, $s, $s);
+    }
+
+    $whereClause = implode(' AND ', $where);
+    $sql = "SELECT v.*, k.firma_name, k.vorname, k.nachname, k.email
+            FROM verkaufsdokumente v
+            LEFT JOIN kunden k ON v.kunde_id = k.id
+            WHERE $whereClause
+            ORDER BY v.datum DESC, v.id DESC";
+    $stmt = $db->prepare($sql);
+    $stmt->execute($params);
+    return $stmt->fetchAll();
+}
+
+function getVerkaufsdokument($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT v.*, k.kundennummer, k.firma_name, k.anrede, k.vorname, k.nachname, k.strasse, k.plz, k.ort, k.land, k.uid_nummer, k.email
+                          FROM verkaufsdokumente v
+                          LEFT JOIN kunden k ON v.kunde_id = k.id
+                          WHERE v.id = ?");
+    $stmt->execute([$id]);
+    return $stmt->fetch();
+}
+
+function getVerkaufsdokumentPositionen($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT p.*, u.satz AS ust_prozent, u.bezeichnung AS ust_bezeichnung
+                          FROM verkaufsdokument_positionen p
+                          LEFT JOIN ust_saetze u ON p.ust_satz_id = u.id
+                          WHERE p.verkaufsdokument_id = ?
+                          ORDER BY p.position");
+    $stmt->execute([$id]);
+    return $stmt->fetchAll();
+}
+
+/**
+ * Netto/USt/Brutto pro Position und in Summe berechnen (nicht persistiert).
+ * $positionen: Liste roher Positionsdaten (artikel_id, bezeichnung, beschreibung, menge, einheit, einzelpreis_netto, ust_satz_id, rabatt_prozent)
+ */
+function berechnePositionsSummen($positionen) {
+    $db = db();
+    $result = [];
+    $nettoGesamt = 0;
+    $ustGesamt = 0;
+    $bruttoGesamt = 0;
+
+    $i = 0;
+    foreach ($positionen as $pos) {
+        $menge = floatval($pos['menge'] ?? 0);
+        $preis = floatval($pos['einzelpreis_netto'] ?? 0);
+        $rabatt = floatval($pos['rabatt_prozent'] ?? 0);
+        $netto = $menge * $preis * (1 - $rabatt / 100);
+
+        $ustProzent = 0;
+        if (!empty($pos['ust_satz_id'])) {
+            $stmt = $db->prepare("SELECT satz FROM ust_saetze WHERE id = ?");
+            $stmt->execute([$pos['ust_satz_id']]);
+            $ustProzent = floatval($stmt->fetchColumn() ?: 0);
+        }
+        $ust = $netto * ($ustProzent / 100);
+        $brutto = $netto + $ust;
+
+        $i++;
+        $pos['position'] = $i;
+        $pos['netto_summe'] = round($netto, 2);
+        $pos['ust_summe'] = round($ust, 2);
+        $pos['brutto_summe'] = round($brutto, 2);
+        $result[] = $pos;
+
+        $nettoGesamt += $pos['netto_summe'];
+        $ustGesamt += $pos['ust_summe'];
+        $bruttoGesamt += $pos['brutto_summe'];
+    }
+
+    return [
+        'positionen' => $result,
+        'netto_gesamt' => round($nettoGesamt, 2),
+        'ust_gesamt' => round($ustGesamt, 2),
+        'brutto_gesamt' => round($bruttoGesamt, 2)
+    ];
+}
+
+/**
+ * Verkaufsdokument (Entwurf) speichern - erstellt oder aktualisiert Kopf + Positionen.
+ * Nur möglich solange status='entwurf'.
+ */
+function saveVerkaufsdokument($data, $positionenInput) {
+    $db = db();
+    $benutzer_id = $_SESSION['benutzer_id'] ?? null;
+
+    if (!empty($data['id'])) {
+        $bestehend = getVerkaufsdokument($data['id']);
+        if (!$bestehend || $bestehend['status'] !== 'entwurf') {
+            return ['success' => false, 'message' => 'Nur Entwürfe können bearbeitet werden.'];
+        }
+    }
+
+    $berechnet = berechnePositionsSummen($positionenInput);
+
+    $kundeId = $data['kunde_id'] ?? null;
+    $vorgaengerId = $data['vorgaenger_id'] ?? null;
+    // Ohne explizite Angabe (z.B. beim erstmaligen Anlegen im Formular) das Standard-
+    // Firmenprofil verwenden; bei einer Umwandlung (umwandelnVerkaufsdokument()) wird das
+    // Profil des Quelldokuments durchgereicht, bleibt aber im Formular änderbar.
+    $firmenprofilId = $data['firmenprofil_id'] ?? (getStandardFirmenprofil()['id'] ?? null);
+    // Nur für Rechnungen relevant (Angebot/Auftrag kennen keinen Zahlungshinweis-Ausdruck) -
+    // ohne explizite Angabe die Standard-Zahlungsbedingung verwenden.
+    $zahlungsbedingungId = ($data['typ'] ?? '') === 'rechnung'
+        ? ($data['zahlungsbedingung_id'] ?? (getStandardZahlungsbedingung()['id'] ?? null))
+        : null;
+    $leistungsdatum = $data['leistungsdatum'] ?? null;
+    $gueltigBis = $data['gueltig_bis'] ?? null;
+    $faelligAm = $data['faellig_am'] ?? null;
+    $betreff = $data['betreff'] ?? null;
+    $einleitungstext = $data['einleitungstext'] ?? null;
+    $schlusstext = $data['schlusstext'] ?? null;
+    $notizen = $data['notizen'] ?? null;
+
+    // Gesamtrabatt (Dokument-Ebene, zusätzlich zu den bereits in berechnePositionsSummen()
+    // berücksichtigten Positions-Rabatten) - reduziert Netto/USt/Brutto proportional.
+    $gesamtrabattProzent = max(0, min(100, floatval($data['gesamtrabatt_prozent'] ?? 0)));
+    $rabattfaktor = 1 - ($gesamtrabattProzent / 100);
+    $nettoGesamt = round($berechnet['netto_gesamt'] * $rabattfaktor, 2);
+    $ustGesamt = round($berechnet['ust_gesamt'] * $rabattfaktor, 2);
+    $bruttoGesamt = round($nettoGesamt + $ustGesamt, 2);
+
+    try {
+        $db->beginTransaction();
+
+        if (!empty($data['id'])) {
+            $verkaufsdokumentId = $data['id'];
+            $stmt = $db->prepare("UPDATE verkaufsdokumente SET
+                kunde_id=?, firmenprofil_id=?, zahlungsbedingung_id=?, datum=?, leistungsdatum=?, gueltig_bis=?, faellig_am=?, betreff=?, einleitungstext=?, schlusstext=?,
+                gesamtrabatt_prozent=?, netto_gesamt=?, ust_gesamt=?, brutto_gesamt=?, notizen=?, geaendert_von=?
+                WHERE id=?");
+            $stmt->execute([
+                $kundeId ?: null, $firmenprofilId ?: null, $zahlungsbedingungId ?: null, $data['datum'], $leistungsdatum ?: null, $gueltigBis ?: null,
+                $faelligAm ?: null, $betreff ?: null, $einleitungstext ?: null, $schlusstext ?: null,
+                $gesamtrabattProzent, $nettoGesamt, $ustGesamt, $bruttoGesamt,
+                $notizen ?: null, $benutzer_id, $verkaufsdokumentId
+            ]);
+            $db->prepare("DELETE FROM verkaufsdokument_positionen WHERE verkaufsdokument_id = ?")->execute([$verkaufsdokumentId]);
+        } else {
+            $stmt = $db->prepare("INSERT INTO verkaufsdokumente
+                (typ, status, kunde_id, firmenprofil_id, zahlungsbedingung_id, vorgaenger_id, datum, leistungsdatum, gueltig_bis, faellig_am, betreff, einleitungstext, schlusstext,
+                 gesamtrabatt_prozent, netto_gesamt, ust_gesamt, brutto_gesamt, notizen, erstellt_von)
+                VALUES (?, 'entwurf', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $data['typ'], $kundeId ?: null, $firmenprofilId ?: null, $zahlungsbedingungId ?: null, $vorgaengerId ?: null, $data['datum'],
+                $leistungsdatum ?: null, $gueltigBis ?: null, $faelligAm ?: null,
+                $betreff ?: null, $einleitungstext ?: null, $schlusstext ?: null,
+                $gesamtrabattProzent, $nettoGesamt, $ustGesamt, $bruttoGesamt,
+                $notizen ?: null, $benutzer_id
+            ]);
+            $verkaufsdokumentId = $db->lastInsertId();
+        }
+
+        foreach ($berechnet['positionen'] as $pos) {
+            $stmt = $db->prepare("INSERT INTO verkaufsdokument_positionen
+                (verkaufsdokument_id, position, artikel_id, bezeichnung, beschreibung, menge, einheit, einzelpreis_netto, ust_satz_id, rabatt_prozent, netto_summe, ust_summe, brutto_summe)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $verkaufsdokumentId, $pos['position'], ($pos['artikel_id'] ?? null) ?: null, $pos['bezeichnung'], ($pos['beschreibung'] ?? null) ?: null,
+                $pos['menge'], ($pos['einheit'] ?? null) ?: 'Stk', $pos['einzelpreis_netto'], ($pos['ust_satz_id'] ?? null) ?: null,
+                $pos['rabatt_prozent'] ?? 0, $pos['netto_summe'], $pos['ust_summe'], $pos['brutto_summe']
+            ]);
+        }
+
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        return ['success' => false, 'message' => 'Fehler beim Speichern: ' . $e->getMessage()];
+    }
+
+    if (function_exists('logAction')) {
+        $aktion = !empty($data['id']) ? 'geaendert' : 'erstellt';
+        logAction('verkaufsdokumente', $verkaufsdokumentId, $aktion, ucfirst($data['typ']) . ' gespeichert: ' . ($data['betreff'] ?? ''));
+    }
+
+    return ['success' => true, 'id' => $verkaufsdokumentId];
+}
+
+function deleteVerkaufsdokument($id) {
+    $doc = getVerkaufsdokument($id);
+    if (!$doc || $doc['status'] !== 'entwurf') {
+        return ['success' => false, 'message' => 'Nur Entwürfe können gelöscht werden.'];
+    }
+    $db = db();
+    $stmt = $db->prepare("DELETE FROM verkaufsdokumente WHERE id = ?");
+    $result = $stmt->execute([$id]);
+    if ($result && function_exists('logAction')) {
+        logAction('verkaufsdokumente', $id, 'geloescht', ucfirst($doc['typ']) . ' gelöscht: ' . ($doc['betreff'] ?? ''));
+    }
+    return ['success' => $result];
+}
+
+/**
+ * Angebot -> Auftrag bzw. Auftrag -> Rechnung: neues Entwurfs-Dokument klonen,
+ * Positionen kopieren, Ursprungsdokument-Status aktualisieren.
+ */
+function umwandelnVerkaufsdokument($id, $neuerTyp) {
+    $doc = getVerkaufsdokument($id);
+    if (!$doc) {
+        return ['success' => false, 'message' => 'Dokument nicht gefunden.'];
+    }
+
+    $erlaubt = ['angebot' => 'auftrag', 'auftrag' => 'rechnung'];
+    if (($erlaubt[$doc['typ']] ?? null) !== $neuerTyp) {
+        return ['success' => false, 'message' => 'Ungültige Umwandlung.'];
+    }
+    if ($doc['status'] === 'entwurf') {
+        return ['success' => false, 'message' => ucfirst($doc['typ']) . ' muss zuerst finalisiert werden (Nummer vergeben), bevor es umgewandelt werden kann.'];
+    }
+
+    $positionen = getVerkaufsdokumentPositionen($id);
+    $db = db();
+    $benutzer_id = $_SESSION['benutzer_id'] ?? null;
+
+    try {
+        $db->beginTransaction();
+
+        $stmt = $db->prepare("INSERT INTO verkaufsdokumente
+            (typ, status, kunde_id, firmenprofil_id, vorgaenger_id, datum, leistungsdatum, faellig_am, betreff, einleitungstext, schlusstext,
+             gesamtrabatt_prozent, netto_gesamt, ust_gesamt, brutto_gesamt, notizen, erstellt_von)
+            VALUES (?, 'entwurf', ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $neuerTyp, $doc['kunde_id'], $doc['firmenprofil_id'], $id, $doc['leistungsdatum'], $doc['faellig_am'],
+            $doc['betreff'], $doc['einleitungstext'], $doc['schlusstext'],
+            $doc['gesamtrabatt_prozent'], $doc['netto_gesamt'], $doc['ust_gesamt'], $doc['brutto_gesamt'], $doc['notizen'], $benutzer_id
+        ]);
+        $neueId = $db->lastInsertId();
+
+        foreach ($positionen as $pos) {
+            $stmt = $db->prepare("INSERT INTO verkaufsdokument_positionen
+                (verkaufsdokument_id, position, artikel_id, bezeichnung, beschreibung, menge, einheit, einzelpreis_netto, ust_satz_id, rabatt_prozent, netto_summe, ust_summe, brutto_summe)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $neueId, $pos['position'], $pos['artikel_id'], $pos['bezeichnung'], $pos['beschreibung'],
+                $pos['menge'], $pos['einheit'], $pos['einzelpreis_netto'], $pos['ust_satz_id'], $pos['rabatt_prozent'],
+                $pos['netto_summe'], $pos['ust_summe'], $pos['brutto_summe']
+            ]);
+        }
+
+        // 'abgeschlossen' bleibt der eigene, unabhängige "finalisiert"-Status von Rechnungen
+        // (siehe finalizeVerkaufsrechnung()) - hier geht es um den jeweiligen QUELL-Beleg, der
+        // in einen Folgebeleg umgewandelt wurde, deshalb eigene Werte pro Dokumenttyp.
+        $neuerStatus = $doc['typ'] === 'angebot' ? 'auftrag_erstellt' : 'rechnung_erstellt';
+        $db->prepare("UPDATE verkaufsdokumente SET status = ? WHERE id = ?")->execute([$neuerStatus, $id]);
+
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        return ['success' => false, 'message' => 'Fehler bei der Umwandlung: ' . $e->getMessage()];
+    }
+
+    if (function_exists('logAction')) {
+        logAction('verkaufsdokumente', $neueId, 'erstellt', ucfirst($neuerTyp) . ' erstellt aus ' . ucfirst($doc['typ']) . ' #' . $id);
+    }
+
+    return ['success' => true, 'id' => $neueId];
+}
+
+/**
+ * Rendert einen Nummernkreis-Format-String zu einer konkreten Belegnummer.
+ * Platzhalter: {JJJJ} 4-stelliges Jahr, {JJ} 2-stelliges Jahr, {MM} Monat, {TT} Tag
+ * (jeweils vom Belegdatum $datum), {N}/{NN}/{NNN}/... laufende Nummer (Stellenanzahl
+ * = Anzahl der N, mit führenden Nullen aufgefüllt).
+ */
+function formatiereNummernkreisNummer($format, $datum, $laufendeNummer) {
+    $ts = strtotime($datum) ?: time();
+    $ersetzungen = [
+        '{JJJJ}' => date('Y', $ts),
+        '{JJ}' => date('y', $ts),
+        '{MM}' => date('m', $ts),
+        '{TT}' => date('d', $ts),
+    ];
+    $nummer = strtr($format, $ersetzungen);
+
+    return preg_replace_callback('/\{(N+)\}/', function ($m) use ($laufendeNummer) {
+        return str_pad($laufendeNummer, strlen($m[1]), '0', STR_PAD_LEFT);
+    }, $nummer);
+}
+
+// ============================================
+// FINALISIEREN / STORNO / ZAHLUNGSABGLEICH
+// ============================================
+
+/**
+ * Zieht die nächste Nummer aus einem Nummernkreis (SELECT ... FOR UPDATE - verhindert
+ * doppelte Nummern bei gleichzeitigen Finalisierungen). Muss innerhalb einer bereits
+ * offenen Transaktion aufgerufen werden. Es gibt nur noch eine Zeile pro schluessel (nicht
+ * mehr pro Jahr) - falls noch keine existiert (z.B. ganz neue Installation), wird sie einmalig
+ * mit einem Standardformat angelegt. Ob der Zähler bei einem Jahreswechsel auf 1 zurückspringt,
+ * entscheidet ausschließlich das eingestellte Format: enthält es {JJJJ} oder {JJ}, wird beim
+ * ersten Beleg eines neuen Jahres zurückgesetzt, sonst läuft er unbegrenzt weiter.
+ */
+function zieheNummernkreisNummer($schluessel, $jahr, $datum) {
+    $db = db();
+    $standardFormate = [
+        'rechnung' => 'RE-{JJJJ}-{NNNN}',
+        'angebot' => 'AN-{JJJJ}-{NNNN}',
+        'auftrag' => 'AU-{JJJJ}-{NNNN}',
+        'kunde' => 'K-{NNNN}',
+    ];
+
+    $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE schluessel = ? FOR UPDATE");
+    $stmt->execute([$schluessel]);
+    $kreis = $stmt->fetch();
+    if (!$kreis) {
+        $db->prepare("INSERT INTO nummernkreise (schluessel, jahr, format, naechste_nummer) VALUES (?, ?, ?, 1)")
+           ->execute([$schluessel, $jahr, $standardFormate[$schluessel] ?? '{JJJJ}-{NNNN}']);
+        $stmt = $db->prepare("SELECT * FROM nummernkreise WHERE schluessel = ? FOR UPDATE");
+        $stmt->execute([$schluessel]);
+        $kreis = $stmt->fetch();
+    }
+
+    $hatJahresplatzhalter = strpos($kreis['format'], '{JJJJ}') !== false || strpos($kreis['format'], '{JJ}') !== false;
+    $laufendeNummer = ($hatJahresplatzhalter && (int) $kreis['jahr'] !== (int) $jahr) ? 1 : (int) $kreis['naechste_nummer'];
+
+    $nummer = formatiereNummernkreisNummer($kreis['format'], $datum, $laufendeNummer);
+    $db->prepare("UPDATE nummernkreise SET naechste_nummer = ?, jahr = ? WHERE id = ?")
+       ->execute([$laufendeNummer + 1, $jahr, $kreis['id']]);
+    return $nummer;
+}
+
+/**
+ * Kundennummer aus dem Nummernkreis ziehen. Anders als Angebot/Auftrag/Rechnung ist die
+ * Kundennummer NICHT jahresgebunden (ein Kunde bleibt über Jahre hinweg derselbe) - deshalb
+ * fester Jahr-Sentinel 0 statt des aktuellen Kalenderjahres. Das Belegdatum (für etwaige
+ * {JJJJ}/{MM}/{TT}-Platzhalter im Format) ist trotzdem das heutige Datum.
+ */
+function zieheKundennummer() {
+    return zieheNummernkreisNummer('kunde', 0, date('Y-m-d'));
+}
+
+/**
+ * Artikelnummer ziehen - der Zähler läuft PRO Artikeluntergruppe (bzw. wenn keine
+ * Untergruppe gewählt ist, pro Artikelgruppe; ist auch keine Gruppe gewählt, über einen
+ * gemeinsamen Fallback-Zähler). Anders als bei Angebot/Auftrag/Rechnung/Kunde ist das
+ * Format bewusst NICHT über die Nummernkreise-Einstellungen konfigurierbar - nur die
+ * Kurzbezeichnungen von Artikelgruppe/-untergruppe (Artikelgruppen-Verwaltung in artikel.php).
+ * SELECT ... FOR UPDATE verhindert doppelte Nummern bei gleichzeitigem Anlegen; muss
+ * innerhalb einer bereits offenen Transaktion aufgerufen werden (siehe saveArtikel()).
+ */
+function zieheArtikelnummer($artikelgruppeId = null, $artikeluntergruppeId = null) {
+    $db = db();
+
+    if ($artikeluntergruppeId) {
+        $stmt = $db->prepare("SELECT ug.naechste_nummer, ug.kurzbezeichnung AS ukurz, g.kurzbezeichnung AS kurz
+                              FROM artikeluntergruppen ug
+                              JOIN artikelgruppen g ON g.id = ug.artikelgruppe_id
+                              WHERE ug.id = ? FOR UPDATE");
+        $stmt->execute([$artikeluntergruppeId]);
+        $row = $stmt->fetch();
+        if ($row) {
+            $nummer = ($row['kurz'] ?? '') . ($row['ukurz'] ?? '') . str_pad($row['naechste_nummer'], 3, '0', STR_PAD_LEFT);
+            $db->prepare("UPDATE artikeluntergruppen SET naechste_nummer = naechste_nummer + 1 WHERE id = ?")->execute([$artikeluntergruppeId]);
+            return $nummer;
+        }
+    }
+
+    if ($artikelgruppeId) {
+        $stmt = $db->prepare("SELECT naechste_nummer, kurzbezeichnung FROM artikelgruppen WHERE id = ? FOR UPDATE");
+        $stmt->execute([$artikelgruppeId]);
+        $row = $stmt->fetch();
+        if ($row) {
+            $nummer = ($row['kurzbezeichnung'] ?? '') . str_pad($row['naechste_nummer'], 3, '0', STR_PAD_LEFT);
+            $db->prepare("UPDATE artikelgruppen SET naechste_nummer = naechste_nummer + 1 WHERE id = ?")->execute([$artikelgruppeId]);
+            return $nummer;
+        }
+    }
+
+    // Weder Gruppe noch Untergruppe gewählt: gemeinsamer Fallback-Zähler.
+    $stmt = $db->prepare("SELECT naechste_nummer FROM artikel_zaehler_ohne_gruppe WHERE id = 1 FOR UPDATE");
+    $stmt->execute();
+    $naechsteNummer = $stmt->fetchColumn();
+    $db->exec("UPDATE artikel_zaehler_ohne_gruppe SET naechste_nummer = naechste_nummer + 1 WHERE id = 1");
+    return 'ART' . str_pad($naechsteNummer, 3, '0', STR_PAD_LEFT);
+}
+
+/**
+ * Finalisiert ein Angebot oder einen Auftrag: vergibt eine Nummer aus dem passenden
+ * Nummernkreis (danach nicht mehr editierbar/löschbar - siehe
+ * saveVerkaufsdokument()/deleteVerkaufsdokument()). Status danach: 'erstellt' (finalisiert/
+ * nummeriert, aber noch nicht per E-Mail verschickt - getrennt von 'versendet', das erst beim
+ * ersten erfolgreichen Versand gesetzt wird, siehe sendeVerkaufsdokumentEmail()). Erzeugt -
+ * anders als finalizeVerkaufsrechnung() - KEINE Ledger-Zeilen, da Angebote/Aufträge steuerlich
+ * nicht relevant sind.
+ */
+function finalizeAngebotOderAuftrag($verkaufsdokumentId) {
+    $db = db();
+    $doc = getVerkaufsdokument($verkaufsdokumentId);
+    if (!$doc) {
+        return ['success' => false, 'message' => 'Dokument nicht gefunden.'];
+    }
+    if (!in_array($doc['typ'], ['angebot', 'auftrag'], true)) {
+        return ['success' => false, 'message' => 'Nur Angebote und Aufträge können hierüber finalisiert werden.'];
+    }
+    if ($doc['status'] !== 'entwurf') {
+        return ['success' => false, 'message' => ucfirst($doc['typ']) . ' ist bereits finalisiert.'];
+    }
+
+    $positionen = getVerkaufsdokumentPositionen($verkaufsdokumentId);
+    if (empty($positionen)) {
+        return ['success' => false, 'message' => ucfirst($doc['typ']) . ' hat keine Positionen.'];
+    }
+
+    $benutzer_id = $_SESSION['benutzer_id'] ?? null;
+    $jahr = (int)date('Y', strtotime($doc['datum']));
+
+    // Angebote UND Aufträge: 'erstellt' (finalisiert/nummeriert, aber noch nicht per E-Mail
+    // versendet - siehe sendeVerkaufsdokumentEmail(), die 'erstellt' -> 'versendet' hebt,
+    // sobald der erste Versand erfolgreich war).
+    $neuerStatus = 'erstellt';
+
+    try {
+        $db->beginTransaction();
+        $nummer = zieheNummernkreisNummer($doc['typ'], $jahr, $doc['datum']);
+        $db->prepare("UPDATE verkaufsdokumente SET status = ?, nummer = ?, geaendert_von = ? WHERE id = ?")
+           ->execute([$neuerStatus, $nummer, $benutzer_id, $verkaufsdokumentId]);
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        return ['success' => false, 'message' => 'Fehler beim Finalisieren: ' . $e->getMessage()];
+    }
+
+    if (function_exists('logAction')) {
+        logAction('verkaufsdokumente', $verkaufsdokumentId, 'geaendert', ucfirst($doc['typ']) . " finalisiert: $nummer");
+    }
+
+    return ['success' => true, 'id' => $verkaufsdokumentId, 'nummer' => $nummer];
+}
+
+/**
+ * Einziger Code-Pfad, der einer Rechnung eine endgültige Nummer gibt und
+ * Ledger-Zeilen in `rechnungen` anlegt. Wird vom manuellen "Finalisieren"-Button
+ * UND vom Cron-Skript für wiederkehrende Rechnungen aufgerufen.
+ *
+ * Da eine Rechnung Positionen mit unterschiedlichen USt-Sätzen haben kann, die
+ * Ledger-Tabelle `rechnungen` aber pro Zeile nur einen USt-Satz kennt, wird pro
+ * vorkommendem USt-Satz eine eigene Ledger-Zeile mit derselben Rechnungsnummer
+ * angelegt (rechnungsnummer hat keinen UNIQUE-Constraint).
+ */
+function finalizeVerkaufsrechnung($verkaufsdokumentId) {
+    $db = db();
+    $doc = getVerkaufsdokument($verkaufsdokumentId);
+    if (!$doc) {
+        return ['success' => false, 'message' => 'Dokument nicht gefunden.'];
+    }
+    if ($doc['typ'] !== 'rechnung') {
+        return ['success' => false, 'message' => 'Nur Rechnungen können finalisiert werden.'];
+    }
+    if ($doc['status'] !== 'entwurf') {
+        return ['success' => false, 'message' => 'Dokument ist bereits finalisiert oder storniert.'];
+    }
+
+    $positionen = getVerkaufsdokumentPositionen($verkaufsdokumentId);
+    if (empty($positionen)) {
+        return ['success' => false, 'message' => 'Rechnung hat keine Positionen.'];
+    }
+
+    $benutzer_id = $_SESSION['benutzer_id'] ?? null;
+    $jahr = (int)date('Y', strtotime($doc['datum']));
+
+    try {
+        $db->beginTransaction();
+
+        $nummer = zieheNummernkreisNummer('rechnung', $jahr, $doc['datum']);
+
+        // Gesamtrabatt (Dokument-Ebene) proportional auf jede USt-Gruppe anwenden, damit die
+        // Ledger-Summe zur tatsächlich fakturierten (rabattierten) Rechnung passt.
+        $rabattfaktor = 1 - (floatval($doc['gesamtrabatt_prozent'] ?? 0) / 100);
+
+        // Positionen nach USt-Satz gruppieren
+        $gruppen = [];
+        foreach ($positionen as $pos) {
+            $key = $pos['ust_satz_id'] ?? 'none';
+            if (!isset($gruppen[$key])) {
+                $gruppen[$key] = ['ust_satz_id' => $pos['ust_satz_id'] ?: null, 'netto' => 0, 'kategorie_id' => null];
+            }
+            $gruppen[$key]['netto'] += $pos['netto_summe'] * $rabattfaktor;
+            if (!$gruppen[$key]['kategorie_id'] && !empty($pos['artikel_id'])) {
+                $stmtA = $db->prepare("SELECT kategorie_id FROM artikel WHERE id = ?");
+                $stmtA->execute([$pos['artikel_id']]);
+                $artikelKat = $stmtA->fetchColumn();
+                if ($artikelKat) $gruppen[$key]['kategorie_id'] = $artikelKat;
+            }
+        }
+
+        // Fallback-Kategorie "Verkaufserlöse" (Seed aus add_verkauf_module.sql)
+        $stmtDefault = $db->prepare("SELECT id FROM kategorien WHERE name = 'Verkaufserlöse' AND typ = 'einnahme' LIMIT 1");
+        $stmtDefault->execute();
+        $defaultKategorieId = $stmtDefault->fetchColumn() ?: null;
+
+        $kundeName = kundenAnzeigename($doc) ?: ('Kunde #' . $doc['kunde_id']);
+
+        foreach ($gruppen as $g) {
+            saveRechnung([
+                'typ' => 'einnahme',
+                'rechnungsnummer' => $nummer,
+                'datum' => $doc['datum'],
+                'faellig_am' => $doc['faellig_am'],
+                'kunde_lieferant' => $kundeName,
+                'beschreibung' => $doc['betreff'] ?: ('Verkaufsrechnung ' . $nummer),
+                'netto_betrag' => round($g['netto'], 2),
+                'ust_satz_id' => $g['ust_satz_id'],
+                'kategorie_id' => $g['kategorie_id'] ?: $defaultKategorieId,
+                'bezahlt' => 0,
+                'bezahlt_am' => null,
+                'zahlungsart' => 'bankueberweisung',
+                'notizen' => null,
+                'verkaufsdokument_id' => $verkaufsdokumentId
+            ]);
+        }
+
+        $db->prepare("UPDATE verkaufsdokumente SET status = 'abgeschlossen', nummer = ?, geaendert_von = ? WHERE id = ?")
+           ->execute([$nummer, $benutzer_id, $verkaufsdokumentId]);
+
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        return ['success' => false, 'message' => 'Fehler beim Finalisieren: ' . $e->getMessage()];
+    }
+
+    if (function_exists('logAction')) {
+        logAction('verkaufsdokumente', $verkaufsdokumentId, 'geaendert', "Rechnung finalisiert: $nummer");
+    }
+
+    return ['success' => true, 'id' => $verkaufsdokumentId, 'nummer' => $nummer];
+}
+
+/**
+ * Storniert eine abgeschlossene Rechnung: legt ein Gegen-Dokument mit negierten
+ * Beträgen an, finalisiert es über denselben Code-Pfad (eigene Nummer, negative
+ * Ledger-Zeilen), markiert das Original als storniert.
+ */
+function storniereVerkaufsrechnung($verkaufsdokumentId) {
+    $doc = getVerkaufsdokument($verkaufsdokumentId);
+    if (!$doc || $doc['typ'] !== 'rechnung' || $doc['status'] !== 'abgeschlossen') {
+        return ['success' => false, 'message' => 'Nur abgeschlossene Rechnungen können storniert werden.'];
+    }
+    if (!empty($doc['storno_von_id'])) {
+        return ['success' => false, 'message' => 'Eine Stornorechnung kann nicht selbst storniert werden.'];
+    }
+
+    $positionen = getVerkaufsdokumentPositionen($verkaufsdokumentId);
+    $db = db();
+    $benutzer_id = $_SESSION['benutzer_id'] ?? null;
+
+    try {
+        $db->beginTransaction();
+
+        $stmt = $db->prepare("INSERT INTO verkaufsdokumente
+            (typ, status, kunde_id, firmenprofil_id, storno_von_id, datum, leistungsdatum, betreff,
+             gesamtrabatt_prozent, netto_gesamt, ust_gesamt, brutto_gesamt, erstellt_von)
+            VALUES ('rechnung', 'entwurf', ?, ?, ?, CURDATE(), ?, ?, ?, ?, ?, ?, ?)");
+        $stmt->execute([
+            $doc['kunde_id'], $doc['firmenprofil_id'], $verkaufsdokumentId, $doc['leistungsdatum'],
+            'Storno zu ' . $doc['nummer'], $doc['gesamtrabatt_prozent'],
+            -$doc['netto_gesamt'], -$doc['ust_gesamt'], -$doc['brutto_gesamt'],
+            $benutzer_id
+        ]);
+        $stornoId = $db->lastInsertId();
+
+        $i = 0;
+        foreach ($positionen as $pos) {
+            $i++;
+            $stmt = $db->prepare("INSERT INTO verkaufsdokument_positionen
+                (verkaufsdokument_id, position, artikel_id, bezeichnung, beschreibung, menge, einheit, einzelpreis_netto, ust_satz_id, rabatt_prozent, netto_summe, ust_summe, brutto_summe)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute([
+                $stornoId, $i, $pos['artikel_id'], $pos['bezeichnung'], $pos['beschreibung'],
+                -$pos['menge'], $pos['einheit'], $pos['einzelpreis_netto'], $pos['ust_satz_id'], $pos['rabatt_prozent'],
+                -$pos['netto_summe'], -$pos['ust_summe'], -$pos['brutto_summe']
+            ]);
+        }
+
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        return ['success' => false, 'message' => 'Fehler beim Stornieren: ' . $e->getMessage()];
+    }
+
+    $result = finalizeVerkaufsrechnung($stornoId);
+    if (!$result['success']) {
+        return $result;
+    }
+
+    $db->prepare("UPDATE verkaufsdokumente SET status = 'storniert' WHERE id = ?")->execute([$verkaufsdokumentId]);
+
+    if (function_exists('logAction')) {
+        logAction('verkaufsdokumente', $verkaufsdokumentId, 'geaendert', 'Storniert durch ' . $result['nummer']);
+    }
+
+    return ['success' => true, 'storno_id' => $stornoId, 'storno_nummer' => $result['nummer']];
+}
+
+/**
+ * Zahlungsstatus einer finalisierten Verkaufsrechnung, aggregiert über alle
+ * zugehörigen Ledger-Zeilen (eine pro USt-Satz, siehe finalizeVerkaufsrechnung()).
+ * bezahlt = true nur wenn ALLE Zeilen bezahlt sind.
+ */
+function getVerkaufsrechnungZahlungsstatus($verkaufsdokumentId) {
+    $db = db();
+    $stmt = $db->prepare("SELECT id, bezahlt, bezahlt_am, zahlungsart, brutto_betrag FROM rechnungen WHERE verkaufsdokument_id = ?");
+    $stmt->execute([$verkaufsdokumentId]);
+    $zeilen = $stmt->fetchAll();
+
+    if (empty($zeilen)) {
+        return ['finalisiert' => false, 'bezahlt' => false, 'bezahlt_am' => null, 'zeilen' => []];
+    }
+
+    $bezahlt = true;
+    $bezahltAm = null;
+    foreach ($zeilen as $z) {
+        if (!$z['bezahlt']) {
+            $bezahlt = false;
+        }
+        if ($z['bezahlt_am'] && (!$bezahltAm || $z['bezahlt_am'] > $bezahltAm)) {
+            $bezahltAm = $z['bezahlt_am'];
+        }
+    }
+
+    return ['finalisiert' => true, 'bezahlt' => $bezahlt, 'bezahlt_am' => $bezahlt ? $bezahltAm : null, 'zeilen' => $zeilen];
+}
+
+/**
+ * Offene (finalisierte, aber nicht vollständig bezahlte) Verkaufsrechnungen fürs Dashboard -
+ * "finalisiert" heißt: mindestens eine Ledger-Zeile in `rechnungen` vorhanden (INNER JOIN
+ * schließt Entwürfe automatisch aus), "offen" heißt: nicht ALLE Zeilen bezahlt (analog zu
+ * getVerkaufsrechnungZahlungsstatus()). Sortiert nach Fälligkeit, überfällige zuerst.
+ */
+function getOffeneVerkaufsrechnungen($limit = 5) {
+    $db = db();
+    $stmt = $db->prepare("SELECT v.id, v.nummer, v.datum, v.faellig_am, v.brutto_gesamt,
+                                  k.firma_name, k.vorname, k.nachname
+                           FROM verkaufsdokumente v
+                           JOIN rechnungen r ON r.verkaufsdokument_id = v.id
+                           LEFT JOIN kunden k ON k.id = v.kunde_id
+                           WHERE v.typ = 'rechnung' AND v.status != 'storniert'
+                           GROUP BY v.id
+                           HAVING SUM(r.bezahlt) < COUNT(r.id)
+                           ORDER BY (v.faellig_am IS NULL), v.faellig_am ASC
+                           LIMIT ?");
+    $stmt->bindValue(1, $limit, PDO::PARAM_INT);
+    $stmt->execute();
+    return $stmt->fetchAll();
+}
+
+/**
+ * Vorgeschlagener Zahlbetrag für ein gegebenes Zahlungsdatum: voller Rechnungsbetrag, oder
+ * abzüglich Skonto, falls $bezahltAm innerhalb der Skonto-Frist der zugeordneten
+ * Zahlungsbedingung liegt (ab Rechnungsdatum gezählt, nicht ab heute). Analog zur
+ * JS-Funktion zahlungsbetragVorschlagen() in verkaufsrechnungen.php (dort für das Zahlung-
+ * Modal, hier für serverseitige Ein-Klick-Aktionen wie den Kassabuch-Schnell-Button) - beide
+ * Stellen bei einer Änderung dieser Logik nachziehen.
+ */
+function berechneVorgeschlagenenZahlbetrag($verkaufsdokumentId, $bezahltAm) {
+    $doc = getVerkaufsdokument($verkaufsdokumentId);
+    if (!$doc) {
+        return null;
+    }
+    $bruttoGesamt = (float)$doc['brutto_gesamt'];
+
+    $zahlungsbedingung = !empty($doc['zahlungsbedingung_id']) ? getZahlungsbedingung($doc['zahlungsbedingung_id']) : null;
+    if ($zahlungsbedingung && $zahlungsbedingung['skonto_prozent'] !== null && $zahlungsbedingung['skonto_tage'] !== null && $bezahltAm) {
+        $skontoDatum = date('Y-m-d', strtotime($doc['datum'] . ' +' . (int)$zahlungsbedingung['skonto_tage'] . ' days'));
+        if ($bezahltAm <= $skontoDatum) {
+            return round($bruttoGesamt * (1 - (float)$zahlungsbedingung['skonto_prozent'] / 100), 2);
+        }
+    }
+    return $bruttoGesamt;
+}
+
+/**
+ * Setzt den Zahlungsstatus ALLER Ledger-Zeilen einer Verkaufsrechnung atomar
+ * (eine Verkaufsrechnung kann mehrere Ledger-Zeilen haben, siehe finalizeVerkaufsrechnung()).
+ *
+ * $tatsaechlicherBetrag: optionaler tatsächlich eingegangener Betrag (Brutto), falls abweichend
+ * vom Rechnungsbetrag (z.B. Skonto-Abzug durch den Kunden). Ist er gesetzt und < brutto_gesamt,
+ * werden die Ledger-Zeilen (netto_betrag/ust_betrag/brutto_betrag) proportional dazu neu
+ * aufgeteilt - das wirkt sich korrekt auf U30/E1a aus (Skonto mindert die Bemessungsgrundlage
+ * tatsächlich), ohne dass die Berechnungslogik selbst angefasst werden muss. Wird IMMER frisch
+ * aus den aktuellen Positionen der Verkaufsrechnung neu berechnet (nicht kumulativ auf einen
+ * eventuell vorher schon abweichenden Ledger-Stand), damit wiederholtes Bearbeiten nicht zu
+ * Rundungsdrift führt. null (oder der volle Betrag) setzt die Ledger-Zeilen auf den vollen,
+ * ursprünglich fakturierten Betrag zurück (z.B. beim Zurücknehmen von "Bezahlt").
+ */
+function markVerkaufsrechnungBezahlt($verkaufsdokumentId, $bezahlt, $bezahlt_am, $zahlungsart, $tatsaechlicherBetrag = null) {
+    $db = db();
+    $doc = getVerkaufsdokument($verkaufsdokumentId);
+    if (!$doc) {
+        return ['success' => false, 'message' => 'Dokument nicht gefunden.'];
+    }
+
+    $stmt = $db->prepare("SELECT id, ust_satz_id FROM rechnungen WHERE verkaufsdokument_id = ?");
+    $stmt->execute([$verkaufsdokumentId]);
+    $ledgerZeilen = $stmt->fetchAll();
+
+    if (empty($ledgerZeilen)) {
+        return ['success' => false, 'message' => 'Keine Ledger-Zeilen zu diesem Dokument gefunden - bitte zuerst finalisieren.'];
+    }
+
+    try {
+        $db->beginTransaction();
+
+        $bruttoGesamt = (float)$doc['brutto_gesamt'];
+        $zahlfaktor = ($bezahlt && $tatsaechlicherBetrag !== null && $bruttoGesamt > 0)
+            ? min(1, max(0, (float)$tatsaechlicherBetrag / $bruttoGesamt))
+            : 1.0;
+
+        $positionen = getVerkaufsdokumentPositionen($verkaufsdokumentId);
+        $rabattfaktor = 1 - (floatval($doc['gesamtrabatt_prozent'] ?? 0) / 100);
+        $gruppen = [];
+        foreach ($positionen as $pos) {
+            $key = $pos['ust_satz_id'] ?? 'none';
+            if (!isset($gruppen[$key])) {
+                $gruppen[$key] = ['netto' => 0, 'ust_prozent' => (float)($pos['ust_prozent'] ?? 0)];
+            }
+            $gruppen[$key]['netto'] += $pos['netto_summe'] * $rabattfaktor;
+        }
+
+        foreach ($ledgerZeilen as $zeile) {
+            $key = $zeile['ust_satz_id'] ?? 'none';
+            if (!isset($gruppen[$key])) continue;
+            $neuNetto = round($gruppen[$key]['netto'] * $zahlfaktor, 2);
+            $neuUst = round($neuNetto * $gruppen[$key]['ust_prozent'] / 100, 2);
+            $neuBrutto = round($neuNetto + $neuUst, 2);
+            $db->prepare("UPDATE rechnungen SET netto_betrag = ?, ust_betrag = ?, brutto_betrag = ? WHERE id = ?")
+               ->execute([$neuNetto, $neuUst, $neuBrutto, $zeile['id']]);
+        }
+
+        foreach ($ledgerZeilen as $zeile) {
+            updateRechnungZahlung($zeile['id'], $bezahlt, $bezahlt_am, $zahlungsart);
+        }
+        $db->commit();
+    } catch (Exception $e) {
+        $db->rollBack();
+        return ['success' => false, 'message' => 'Fehler: ' . $e->getMessage()];
+    }
+
+    return ['success' => true];
+}
+
+/**
+ * Kassabuch-Kurzaktion: Verkaufsrechnung als heute bezahlt markieren UND zugleich allen
+ * noch unnummerierten Ledger-Zeilen dieses Dokuments eine Buchungsnummer vergeben (siehe
+ * vergebeBuchungsnummer() in functions.php) - beide Schritte passieren beim Bankabgleich im
+ * Kassabuch typischerweise im selben Moment. Eine Verkaufsrechnung mit gemischten USt-Sätzen
+ * hat mehrere Ledger-Zeilen (eine pro USt-Satz) und bekommt entsprechend mehrere, fortlaufende
+ * Buchungsnummern.
+ *
+ * Ein-Klick-Aktion ohne eigene Betragseingabe - der Zahlbetrag wird deshalb automatisch anhand
+ * $bezahlt_am und einer eventuellen Skonto-Regel der Zahlungsbedingung vorgeschlagen (siehe
+ * berechneVorgeschlagenenZahlbetrag()), nicht einfach der volle Rechnungsbetrag angenommen.
+ * Für eine abweichende Betragseingabe: Zahlung-Modal bei der Verkaufsrechnung selbst nutzen.
+ */
+function markVerkaufsrechnungBezahltUndVergebeBuchungsnummer($verkaufsdokumentId, $bezahlt_am, $zahlungsart) {
+    $vorgeschlagenerBetrag = berechneVorgeschlagenenZahlbetrag($verkaufsdokumentId, $bezahlt_am);
+    $ergebnis = markVerkaufsrechnungBezahlt($verkaufsdokumentId, true, $bezahlt_am, $zahlungsart, $vorgeschlagenerBetrag);
+    if (!$ergebnis['success']) {
+        return $ergebnis;
+    }
+
+    $db = db();
+    $stmt = $db->prepare("SELECT id FROM rechnungen WHERE verkaufsdokument_id = ? AND buchungsnummer IS NULL");
+    $stmt->execute([$verkaufsdokumentId]);
+    $ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
+
+    $buchungsnummern = [];
+    foreach ($ids as $id) {
+        $vergabe = vergebeBuchungsnummer($id);
+        if ($vergabe['success']) {
+            $buchungsnummern[] = $vergabe['buchungsnummer'];
+        }
+    }
+
+    return ['success' => true, 'buchungsnummern' => $buchungsnummern];
+}

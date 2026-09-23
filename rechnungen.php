@@ -6,6 +6,8 @@ session_start();
 require_once 'config/database.php';
 require_once 'includes/functions.php';
 require_once 'includes/auth.php';
+require_once 'includes/paperless.php';
+require_once 'includes/verkauf_functions.php';
 
 requireLogin();
 
@@ -31,15 +33,19 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
             'bezahlt' => isset($_POST['bezahlt']) ? 1 : 0,
             'bezahlt_am' => $_POST['bezahlt_am'] ?: null,
             'notizen' => $_POST['notizen'],
+            'zahlungsart' => $_POST['zahlungsart'] ?? 'bankueberweisung',
             // EU-Buchungsfelder
             'buchungsart' => $_POST['buchungsart'] ?? 'inland',
             'lieferant_land' => $_POST['lieferant_land'] ?: null,
             'lieferant_uid' => $_POST['lieferant_uid'] ?: null,
             'ausland_ust_satz' => $_POST['ausland_ust_satz'] ?: null,
-            'ausland_ust_betrag' => $_POST['ausland_ust_betrag'] ?: null
+            'ausland_ust_betrag' => $_POST['ausland_ust_betrag'] ?: null,
+            'paperless_document_id' => ($_POST['paperless_document_id'] ?? '') !== '' ? $_POST['paperless_document_id'] : null
         ];
         
-        if (saveRechnung($data)) {
+        if ($data['bezahlt'] && !$data['bezahlt_am']) {
+            setFlashMessage('danger', '"Bezahlt am" muss gesetzt sein, wenn die Rechnung als bezahlt markiert wird (maßgeblich für U30/E1a).');
+        } elseif (saveRechnung($data)) {
             setFlashMessage('success', 'Rechnung erfolgreich gespeichert.');
             // Zurück zur gefilterten Liste mit korrekten Parameter-Namen
             $redirectParams = [];
@@ -57,6 +63,44 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         }
     }
     
+    if (isset($_POST['bezahlt_und_buchungsnummer'])) {
+        $result = markVerkaufsrechnungBezahltUndVergebeBuchungsnummer((int)$_POST['verkaufsdokument_id'], date('Y-m-d'), 'bankueberweisung');
+        if ($result['success']) {
+            $meldung = 'Als bezahlt markiert.';
+            if (!empty($result['buchungsnummern'])) {
+                $meldung .= ' Buchungsnummer' . (count($result['buchungsnummern']) > 1 ? 'n' : '') . ' ' . implode(', ', $result['buchungsnummern']) . ' vergeben.';
+            }
+            setFlashMessage('success', $meldung);
+        } else {
+            setFlashMessage('danger', $result['message']);
+        }
+        $redirectParams = [];
+        if (!empty($_SESSION['rechnungen_filter'])) {
+            foreach ($_SESSION['rechnungen_filter'] as $key => $value) {
+                if ($value !== '' && $value !== null) {
+                    $redirectParams[$key] = $value;
+                }
+            }
+        }
+        header('Location: rechnungen.php' . (!empty($redirectParams) ? '?' . http_build_query($redirectParams) : ''));
+        exit;
+    }
+
+    if (isset($_POST['vergebe_buchungsnummer'])) {
+        $result = vergebeBuchungsnummer((int)$_POST['id']);
+        setFlashMessage($result['success'] ? 'success' : 'danger', $result['success'] ? 'Buchungsnummer ' . $result['buchungsnummer'] . ' vergeben.' : $result['message']);
+        $redirectParams = [];
+        if (!empty($_SESSION['rechnungen_filter'])) {
+            foreach ($_SESSION['rechnungen_filter'] as $key => $value) {
+                if ($value !== '' && $value !== null) {
+                    $redirectParams[$key] = $value;
+                }
+            }
+        }
+        header('Location: rechnungen.php' . (!empty($redirectParams) ? '?' . http_build_query($redirectParams) : ''));
+        exit;
+    }
+
     if (isset($_POST['delete'])) {
         if (deleteRechnung($_POST['id'])) {
             setFlashMessage('success', 'Rechnung gelöscht.');
@@ -95,7 +139,7 @@ if (isset($_GET['reset_filter'])) {
 $hasFilterParams = isset($_GET['typ']) || isset($_GET['jahr']) || isset($_GET['monat']) || 
                    isset($_GET['kategorie_id']) || isset($_GET['bezahlt']) || isset($_GET['suche']);
 
-if ($hasFilterParams) {
+if ($hasFilterParams && $action === 'list') {
     // Neue Filter aus GET übernehmen
     $filters = [
         'typ' => $_GET['typ'] ?? '',
@@ -133,7 +177,7 @@ $rechnungen = getRechnungen($filters);
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Rechnungen - Buchhaltung</title>
+    <title>Kassabuch - Buchhaltung</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.1/font/bootstrap-icons.css" rel="stylesheet">
     <link href="assets/css/style.css" rel="stylesheet">
@@ -188,10 +232,10 @@ $rechnungen = getRechnungen($filters);
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label">Buchungsnr.</label>
-                                    <input type="number" class="form-control" name="buchungsnummer" 
+                                    <input type="number" class="form-control" name="buchungsnummer"
                                            value="<?= htmlspecialchars($rechnung['buchungsnummer'] ?? '') ?>"
-                                           placeholder="<?= $action === 'new' ? 'Auto' : '' ?>">
-                                    <small class="text-muted">Leer = automatisch</small>
+                                           placeholder="Noch nicht vergeben">
+                                    <small class="text-muted">Leer = wird erst später per Button in der Liste vergeben (für U30/E1a maßgeblich)</small>
                                 </div>
                                 <div class="col-md-4">
                                     <label class="form-label">Rechnungsnr.</label>
@@ -282,13 +326,15 @@ $rechnungen = getRechnungen($filters);
                             <div class="row mb-3">
                                 <div class="col-md-6">
                                     <label class="form-label required">Datum</label>
-                                    <input type="date" class="form-control" name="datum" 
+                                    <input type="date" class="form-control" name="datum"
                                            value="<?= $rechnung['datum'] ?? date('Y-m-d') ?>" required>
+                                    <div class="form-text">Rechnungsdatum – rein informativ, fließt nicht in U30/E1a ein</div>
                                 </div>
                                 <div class="col-md-6">
                                     <label class="form-label">Fällig am</label>
-                                    <input type="date" class="form-control" name="faellig_am" 
+                                    <input type="date" class="form-control" name="faellig_am"
                                            value="<?= $rechnung['faellig_am'] ?? '' ?>">
+                                    <div class="form-text">Zahlungsziel laut Rechnung – rein informativ, ohne steuerliche Wirkung</div>
                                 </div>
                             </div>
 
@@ -303,6 +349,29 @@ $rechnungen = getRechnungen($filters);
                                     <?php endforeach; ?>
                                 </datalist>
                             </div>
+
+                            <?php if (paperlessConfigured()): ?>
+                            <div class="mb-3">
+                                <label class="form-label">Beleg aus paperless-ngx verknüpfen</label>
+                                <input type="hidden" name="paperless_document_id" id="paperless_document_id"
+                                       value="<?= htmlspecialchars($rechnung['paperless_document_id'] ?? '') ?>">
+                                <div class="input-group">
+                                    <span class="input-group-text"><i class="bi bi-search"></i></span>
+                                    <input type="text" class="form-control" id="paperless_suche" autocomplete="off"
+                                           placeholder="Titel/Inhalt in paperless-ngx suchen...">
+                                    <?php if (!empty($rechnung['paperless_document_id'])): ?>
+                                    <a href="paperless_proxy.php?id=<?= (int)$rechnung['paperless_document_id'] ?>" target="_blank" class="btn btn-outline-secondary">
+                                        <i class="bi bi-eye me-1"></i>Beleg ansehen
+                                    </a>
+                                    <button type="button" class="btn btn-outline-danger" onclick="entferneBeleg()"><i class="bi bi-x-lg"></i></button>
+                                    <?php endif; ?>
+                                </div>
+                                <div id="paperless_ergebnisse" class="list-group mt-1"></div>
+                                <div id="paperless_ausgewaehlt" class="form-text <?= empty($rechnung['paperless_document_id']) ? 'd-none' : '' ?>">
+                                    <i class="bi bi-paperclip"></i> Beleg #<span id="paperless_ausgewaehlt_id"><?= (int)($rechnung['paperless_document_id'] ?? 0) ?></span> verknüpft
+                                </div>
+                            </div>
+                            <?php endif; ?>
 
                             <div class="mb-3">
                                 <label class="form-label">Beschreibung</label>
@@ -342,7 +411,7 @@ $rechnungen = getRechnungen($filters);
                             </div>
 
                             <div class="row mb-3">
-                                <div class="col-md-6">
+                                <div class="col-md-4">
                                     <label class="form-label">Kategorie</label>
                                     <select class="form-select" name="kategorie_id" id="kategorie_id">
                                         <option value="">-- Wählen --</option>
@@ -355,6 +424,20 @@ $rechnungen = getRechnungen($filters);
                                     </select>
                                 </div>
                                 <div class="col-md-3">
+                                    <label class="form-label">Zahlungsart</label>
+                                    <select class="form-select" name="zahlungsart">
+                                        <option value="bankueberweisung" <?= ($rechnung['zahlungsart'] ?? 'bankueberweisung') === 'bankueberweisung' ? 'selected' : '' ?>>
+                                            🏦 Banküberweisung
+                                        </option>
+                                        <option value="bar" <?= ($rechnung['zahlungsart'] ?? '') === 'bar' ? 'selected' : '' ?>>
+                                            💵 Barzahlung
+                                        </option>
+                                        <option value="sonstige" <?= ($rechnung['zahlungsart'] ?? '') === 'sonstige' ? 'selected' : '' ?>>
+                                            Sonstige
+                                        </option>
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
                                     <label class="form-label">Status</label>
                                     <div class="form-check mt-2">
                                         <input type="checkbox" class="form-check-input" name="bezahlt" id="bezahlt" value="1"
@@ -363,9 +446,11 @@ $rechnungen = getRechnungen($filters);
                                     </div>
                                 </div>
                                 <div class="col-md-3">
-                                    <label class="form-label">Bezahlt am</label>
-                                    <input type="date" class="form-control" name="bezahlt_am" 
-                                           value="<?= $rechnung['bezahlt_am'] ?? '' ?>">
+                                    <label class="form-label" id="bezahlt_am_label">Bezahlt am</label>
+                                    <input type="date" class="form-control" name="bezahlt_am" id="bezahlt_am"
+                                           value="<?= $rechnung['bezahlt_am'] ?? '' ?>"
+                                           <?= ($rechnung['bezahlt'] ?? 0) ? 'required' : '' ?>>
+                                    <div class="form-text">Maßgeblich für U30 und E1a (Ist-Besteuerung)</div>
                                 </div>
                             </div>
 
@@ -386,7 +471,7 @@ $rechnungen = getRechnungen($filters);
                 <?php else: ?>
                 <!-- Liste -->
                 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
-                    <h1 class="h2"><i class="bi bi-receipt me-2"></i>Rechnungen</h1>
+                    <h1 class="h2"><i class="bi bi-receipt me-2"></i>Kassabuch</h1>
                     <div class="btn-toolbar mb-2 mb-md-0">
                         <a href="rechnungen.php?action=new&typ=einnahme" class="btn btn-success me-2">
                             <i class="bi bi-plus-circle me-1"></i>Einnahme
@@ -516,7 +601,7 @@ $rechnungen = getRechnungen($filters);
                                         <th class="text-end">Netto</th>
                                         <th class="text-end">USt</th>
                                         <th class="text-end">Brutto</th>
-                                        <th>Status</th>
+                                        <th>Zahlung</th>
                                         <th class="text-end">Aktionen</th>
                                     </tr>
                                 </thead>
@@ -536,7 +621,18 @@ $rechnungen = getRechnungen($filters);
                                         else $summeAusgaben += $r['brutto_betrag'];
                                     ?>
                                     <tr>
-                                        <td><strong><?= $r['buchungsnummer'] ?? '-' ?></strong></td>
+                                        <td>
+                                            <?php if ($r['buchungsnummer']): ?>
+                                            <strong><?= $r['buchungsnummer'] ?></strong>
+                                            <?php else: ?>
+                                            <form method="POST" class="d-inline">
+                                                <input type="hidden" name="id" value="<?= $r['id'] ?>">
+                                                <button type="submit" name="vergebe_buchungsnummer" class="btn btn-sm btn-outline-warning" title="Buchungsnummer vergeben - erst danach fließt die Buchung in U30/E1a ein">
+                                                    <i class="bi bi-hash"></i> Vergeben
+                                                </button>
+                                            </form>
+                                            <?php endif; ?>
+                                        </td>
                                         <td><?= formatDatum($r['datum']) ?></td>
                                         <td>
                                             <span class="badge bg-<?= $r['typ'] == 'einnahme' ? 'success' : 'danger' ?>">
@@ -555,8 +651,25 @@ $rechnungen = getRechnungen($filters);
                                             <?php else: ?>
                                                 <span class="badge bg-warning text-dark"><i class="bi bi-clock"></i></span>
                                             <?php endif; ?>
+                                            <br>
+                                            <?php if (($r['zahlungsart'] ?? 'bankueberweisung') === 'bar'): ?>
+                                                <small class="text-muted"><i class="bi bi-cash-coin me-1"></i>Bar</small>
+                                            <?php elseif (($r['zahlungsart'] ?? '') === 'sonstige'): ?>
+                                                <small class="text-muted"><i class="bi bi-three-dots me-1"></i>Sonstige</small>
+                                            <?php else: ?>
+                                                <small class="text-muted"><i class="bi bi-bank2 me-1"></i>Überweisung</small>
+                                            <?php endif; ?>
                                         </td>
                                         <td class="text-end">
+                                            <?php if (!$r['bezahlt'] && !empty($r['verkaufsdokument_id'])): ?>
+                                            <form method="POST" class="d-inline">
+                                                <input type="hidden" name="verkaufsdokument_id" value="<?= $r['verkaufsdokument_id'] ?>">
+                                                <button type="submit" name="bezahlt_und_buchungsnummer" class="btn btn-sm btn-outline-success"
+                                                        title="Markiert diese Verkaufsrechnung (alle zugehörigen Buchungszeilen) als heute bezahlt und vergibt zugleich die nächste freie Buchungsnummer. Berücksichtigt automatisch Skonto, falls die Zahlungsbedingung eines vorsieht und die Frist noch läuft. Für einen abweichenden Betrag: Zahlung-Modal bei den Verkaufsrechnungen nutzen.">
+                                                    <i class="bi bi-cash-coin"></i>
+                                                </button>
+                                            </form>
+                                            <?php endif; ?>
                                             <a href="rechnungen.php?action=edit&id=<?= $r['id'] ?>" class="btn btn-sm btn-outline-primary">
                                                 <i class="bi bi-pencil"></i>
                                             </a>
@@ -621,7 +734,19 @@ $rechnungen = getRechnungen($filters);
         document.getElementById('netto_betrag')?.addEventListener('input', berechnebrutto);
         document.getElementById('ust_satz_id')?.addEventListener('change', berechnebrutto);
         document.getElementById('ausland_ust_satz')?.addEventListener('input', berechnebrutto);
-        
+
+        // "Bezahlt am" ist Pflichtfeld, sobald "Bezahlt" angehakt ist (maßgeblich für U30/E1a)
+        function toggleBezahltAmRequired() {
+            const bezahlt = document.getElementById('bezahlt');
+            const bezahltAm = document.getElementById('bezahlt_am');
+            if (!bezahlt || !bezahltAm) return;
+            bezahltAm.required = bezahlt.checked;
+            if (bezahlt.checked && !bezahltAm.value) {
+                bezahltAm.value = new Date().toISOString().slice(0, 10);
+            }
+        }
+        document.getElementById('bezahlt')?.addEventListener('change', toggleBezahltAmRequired);
+
         // Buchungsart-Logik
         const buchungsartInfos = {
             'inland': 'Inland: Normale Buchung mit österreichischer USt',
@@ -714,6 +839,54 @@ $rechnungen = getRechnungen($filters);
             updateBuchungsart();
             berechnebrutto();
         });
+
+        // paperless-Belegsuche (Live-Suche, debounced)
+        let paperlessSucheTimeout = null;
+        const paperlessSucheFeld = document.getElementById('paperless_suche');
+        if (paperlessSucheFeld) {
+            paperlessSucheFeld.addEventListener('input', function() {
+                clearTimeout(paperlessSucheTimeout);
+                const q = this.value.trim();
+                const ergebnisse = document.getElementById('paperless_ergebnisse');
+                if (q.length < 2) {
+                    ergebnisse.innerHTML = '';
+                    return;
+                }
+                paperlessSucheTimeout = setTimeout(() => {
+                    fetch('paperless_search.php?q=' + encodeURIComponent(q))
+                        .then(r => r.json())
+                        .then(data => {
+                            ergebnisse.innerHTML = '';
+                            (data.results || []).forEach(doc => {
+                                const item = document.createElement('button');
+                                item.type = 'button';
+                                item.className = 'list-group-item list-group-item-action';
+                                item.textContent = doc.title + (doc.correspondent ? ' - ' + doc.correspondent : '');
+                                item.onclick = () => waehleBeleg(doc.id, doc.title);
+                                ergebnisse.appendChild(item);
+                            });
+                        })
+                        .catch(() => { ergebnisse.innerHTML = '<div class="text-danger small">Suche fehlgeschlagen.</div>'; });
+                }, 400);
+            });
+        }
+
+        function waehleBeleg(id, title) {
+            document.getElementById('paperless_document_id').value = id;
+            document.getElementById('paperless_ergebnisse').innerHTML = '';
+            document.getElementById('paperless_suche').value = '';
+            const info = document.getElementById('paperless_ausgewaehlt');
+            if (info) {
+                info.classList.remove('d-none');
+                document.getElementById('paperless_ausgewaehlt_id').textContent = id;
+            }
+        }
+
+        function entferneBeleg() {
+            document.getElementById('paperless_document_id').value = '';
+            const info = document.getElementById('paperless_ausgewaehlt');
+            if (info) info.classList.add('d-none');
+        }
     </script>
 </body>
 </html>

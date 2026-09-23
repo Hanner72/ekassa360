@@ -172,7 +172,7 @@ function getRechnungen($filters = []) {
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
             LEFT JOIN ust_saetze u ON r.ust_satz_id = u.id
             $whereClause
-            ORDER BY r.datum DESC, r.created_at DESC";
+            ORDER BY (r.buchungsnummer IS NULL) DESC, r.buchungsnummer DESC, r.datum DESC, r.created_at DESC";
     
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -240,14 +240,11 @@ function saveRechnung($data) {
         $ustBetrag = 0; // Keine österreichische Vorsteuer!
     }
     
-    // Buchungsnummer ermitteln
+    // Buchungsnummer: wird NICHT automatisch vergeben (siehe vergebeBuchungsnummer()) - der
+    // Nutzer vergibt sie bewusst per Button, damit die Reihenfolge mit dem Bankkonto/Kassabuch
+    // übereinstimmt. Ohne Buchungsnummer fließt die Buchung auch nicht in U30/E1a ein.
     $buchungsnummer = $data['buchungsnummer'] ?? null;
-    if (empty($buchungsnummer) && empty($data['id'])) {
-        // Neue Buchung: nächste Buchungsnummer für das Jahr ermitteln
-        $jahr = date('Y', strtotime($data['datum']));
-        $buchungsnummer = getNextBuchungsnummer('rechnungen', $jahr);
-    }
-    
+
     // Benutzer-ID für Protokoll
     $benutzer_id = $_SESSION['benutzer_id'] ?? null;
     
@@ -257,42 +254,67 @@ function saveRechnung($data) {
     $ausland_ust_satz = !empty($data['ausland_ust_satz']) ? str_replace(',', '.', $data['ausland_ust_satz']) : null;
     $ausland_ust_betrag = !empty($data['ausland_ust_betrag']) ? str_replace(',', '.', $data['ausland_ust_betrag']) : null;
     
+    // Verkauf-Modul: optionale Verknüpfung zu einem Verkaufsdokument / paperless-Dokument
+    // (Pass-through, Default null - bestehende Aufrufe aus rechnungen.php bleiben unverändert).
+    // WICHTIG: rechnungen.php's generisches Bearbeiten-Formular kennt/sendet
+    // verkaufsdokument_id gar nicht (kein Formularfeld dafür) - ohne die folgende Sonderbehandlung
+    // würde JEDES Speichern über dieses Formular die Verknüpfung einer aus einer Verkaufsrechnung
+    // erzeugten Kassabuch-Zeile stillschweigend auf NULL setzen (Zahlungsstatus/Skonto-Logik der
+    // Verkaufsrechnung würde die Zeile danach nicht mehr finden). Fehlt der Schlüssel im $data-
+    // Array komplett (Aufrufer hat ihn nicht mitgeschickt), wird beim Update der bestehende Wert
+    // beibehalten statt überschrieben; ist er explizit (auch als null) übergeben, gilt das wie
+    // gewohnt (z.B. finalizeVerkaufsrechnung() übergibt immer eine echte ID).
+    if (!array_key_exists('verkaufsdokument_id', $data) && !empty($data['id'])) {
+        $stmt = $db->prepare("SELECT verkaufsdokument_id FROM rechnungen WHERE id = ?");
+        $stmt->execute([$data['id']]);
+        $verkaufsdokument_id = $stmt->fetchColumn() ?: null;
+    } else {
+        $verkaufsdokument_id = $data['verkaufsdokument_id'] ?? null;
+    }
+    $paperless_document_id = $data['paperless_document_id'] ?? null;
+
     if (!empty($data['id'])) {
         // Update
-        $stmt = $db->prepare("UPDATE rechnungen SET 
+        $stmt = $db->prepare("UPDATE rechnungen SET
             typ = ?, rechnungsnummer = ?, buchungsnummer = ?, datum = ?, faellig_am = ?,
             kunde_lieferant = ?, beschreibung = ?, netto_betrag = ?,
             ust_satz_id = ?, ust_betrag = ?, brutto_betrag = ?,
-            kategorie_id = ?, bezahlt = ?, bezahlt_am = ?, notizen = ?, geaendert_von = ?,
-            buchungsart = ?, lieferant_land = ?, lieferant_uid = ?, ausland_ust_satz = ?, ausland_ust_betrag = ?
+            kategorie_id = ?, bezahlt = ?, bezahlt_am = ?, zahlungsart = ?, notizen = ?, geaendert_von = ?,
+            buchungsart = ?, lieferant_land = ?, lieferant_uid = ?, ausland_ust_satz = ?, ausland_ust_betrag = ?,
+            verkaufsdokument_id = ?, paperless_document_id = ?
             WHERE id = ?");
         $result = $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
             $data['kunde_lieferant'], $data['beschreibung'], $data['netto_betrag'],
             $data['ust_satz_id'] ?: null, $ustBetrag, $bruttoBetrag,
-            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null, $data['notizen'],
+            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null,
+            $data['zahlungsart'] ?? 'bankueberweisung', $data['notizen'],
             $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag,
+            $verkaufsdokument_id, $paperless_document_id,
             $data['id']
         ]);
-        
+
         if ($result && function_exists('logAction')) {
-            logAction('rechnungen', $data['id'], 'geaendert', 
+            logAction('rechnungen', $data['id'], 'geaendert',
                       $data['typ'] . ': ' . $data['kunde_lieferant'] . ' - ' . number_format($bruttoBetrag, 2) . ' €');
         }
         return $result;
     } else {
         // Insert
-        $stmt = $db->prepare("INSERT INTO rechnungen 
-            (typ, rechnungsnummer, buchungsnummer, datum, faellig_am, kunde_lieferant, beschreibung, 
-             netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, kategorie_id, bezahlt, bezahlt_am, notizen, erstellt_von,
-             buchungsart, lieferant_land, lieferant_uid, ausland_ust_satz, ausland_ust_betrag)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+        $stmt = $db->prepare("INSERT INTO rechnungen
+            (typ, rechnungsnummer, buchungsnummer, datum, faellig_am, kunde_lieferant, beschreibung,
+             netto_betrag, ust_satz_id, ust_betrag, brutto_betrag, kategorie_id, bezahlt, bezahlt_am, zahlungsart, notizen, erstellt_von,
+             buchungsart, lieferant_land, lieferant_uid, ausland_ust_satz, ausland_ust_betrag,
+             verkaufsdokument_id, paperless_document_id)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
         $stmt->execute([
             $data['typ'], $data['rechnungsnummer'], $buchungsnummer, $data['datum'], $data['faellig_am'] ?: null,
             $data['kunde_lieferant'], $data['beschreibung'], $data['netto_betrag'],
             $data['ust_satz_id'] ?: null, $ustBetrag, $bruttoBetrag,
-            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null, $data['notizen'],
-            $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag
+            $data['kategorie_id'] ?: null, $data['bezahlt'] ?? 0, $data['bezahlt_am'] ?: null,
+            $data['zahlungsart'] ?? 'bankueberweisung', $data['notizen'],
+            $benutzer_id, $buchungsart, $lieferant_land, $lieferant_uid, $ausland_ust_satz, $ausland_ust_betrag,
+            $verkaufsdokument_id, $paperless_document_id
         ]);
         $id = $db->lastInsertId();
         
@@ -322,6 +344,38 @@ function getNextBuchungsnummer($tabelle, $jahr) {
 }
 
 /**
+ * Buchungsnummer für eine bestehende Buchung manuell vergeben (Kassabuch-Button). Buchungen
+ * ohne Buchungsnummer fließen nicht in U30/E1a ein (siehe berechneUstVoranmeldung()/
+ * berechneEinkommensteuer()) - der Nutzer entscheidet so bewusst, wann eine Buchung mit dem
+ * Bankkonto abgeglichen und "fixiert" ist.
+ */
+function vergebeBuchungsnummer($id) {
+    $db = db();
+    $stmt = $db->prepare("SELECT id, datum, buchungsnummer FROM rechnungen WHERE id = ?");
+    $stmt->execute([$id]);
+    $rechnung = $stmt->fetch();
+
+    if (!$rechnung) {
+        return ['success' => false, 'message' => 'Buchung nicht gefunden.'];
+    }
+    if (!empty($rechnung['buchungsnummer'])) {
+        return ['success' => false, 'message' => 'Buchung hat bereits eine Buchungsnummer.'];
+    }
+
+    $jahr = date('Y', strtotime($rechnung['datum']));
+    $buchungsnummer = getNextBuchungsnummer('rechnungen', $jahr);
+
+    $stmt = $db->prepare("UPDATE rechnungen SET buchungsnummer = ? WHERE id = ?");
+    $stmt->execute([$buchungsnummer, $id]);
+
+    if (function_exists('logAction')) {
+        logAction('rechnungen', $id, 'geaendert', "Buchungsnummer $buchungsnummer vergeben");
+    }
+
+    return ['success' => true, 'buchungsnummer' => $buchungsnummer];
+}
+
+/**
  * Rechnung löschen
  */
 function deleteRechnung($id) {
@@ -340,6 +394,30 @@ function deleteRechnung($id) {
     
     $stmt = $db->prepare("DELETE FROM rechnungen WHERE id = ?");
     return $stmt->execute([$id]);
+}
+
+/**
+ * Zahlungsstatus einer Ledger-Zeile aktualisieren (z.B. "Als bezahlt markieren").
+ * Maßgeblich für U30/E1a (Ist-Besteuerung) - siehe berechneUstVoranmeldung()/berechneEinkommensteuer().
+ */
+function updateRechnungZahlung($id, $bezahlt, $bezahlt_am, $zahlungsart) {
+    $db = db();
+    $benutzer_id = $_SESSION['benutzer_id'] ?? null;
+
+    $stmt = $db->prepare("UPDATE rechnungen SET bezahlt = ?, bezahlt_am = ?, zahlungsart = ?, geaendert_von = ? WHERE id = ?");
+    $result = $stmt->execute([
+        $bezahlt ? 1 : 0,
+        $bezahlt ? ($bezahlt_am ?: null) : null,
+        $zahlungsart ?? 'bankueberweisung',
+        $benutzer_id,
+        $id
+    ]);
+
+    if ($result && function_exists('logAction')) {
+        logAction('rechnungen', $id, 'geaendert', $bezahlt ? 'Als bezahlt markiert' : 'Zahlung zurückgesetzt');
+    }
+
+    return $result;
 }
 
 // ============================================
@@ -427,23 +505,23 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
         'zahllast' => 0
     ];
     
-    // Zeitraum bestimmen
+    // Zeitraum bestimmen (Ist-Besteuerung: Zahlungsdatum ist maßgeblich)
     if ($typ == 'quartal') {
         $startMonat = ($monat - 1) * 3 + 1;
         $endMonat = $monat * 3;
-        $datumFilter = "YEAR(r.datum) = ? AND MONTH(r.datum) BETWEEN ? AND ?";
+        $datumFilter = "YEAR(r.bezahlt_am) = ? AND MONTH(r.bezahlt_am) BETWEEN ? AND ?";
         $params = [$jahr, $startMonat, $endMonat];
     } else {
-        $datumFilter = "YEAR(r.datum) = ? AND MONTH(r.datum) = ?";
+        $datumFilter = "YEAR(r.bezahlt_am) = ? AND MONTH(r.bezahlt_am) = ?";
         $params = [$jahr, $monat];
     }
-    
-    // Einnahmen nach USt-Satz gruppiert
+
+    // Einnahmen nach USt-Satz gruppiert (nur bezahlte Rechnungen)
     $sql = "SELECT u.u30_kennzahl_bemessung, u.satz,
                    SUM(r.netto_betrag) as netto, SUM(r.ust_betrag) as ust
             FROM rechnungen r
             LEFT JOIN ust_saetze u ON r.ust_satz_id = u.id
-            WHERE r.typ = 'einnahme' AND $datumFilter
+            WHERE r.typ = 'einnahme' AND r.bezahlt = 1 AND r.buchungsnummer IS NOT NULL AND $datumFilter
             GROUP BY u.u30_kennzahl_bemessung, u.satz";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
@@ -476,31 +554,37 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     }
     $u30['kz000'] = $gesamtLieferungen;
     
-    // Vorsteuer (Ausgaben) - nur Inland und Drittland-Import
+    // Vorsteuer (Ausgaben) - nur Inland und Drittland-Import, nur bezahlte Rechnungen
     $sql = "SELECT SUM(r.ust_betrag) as vorsteuer
             FROM rechnungen r
-            WHERE r.typ = 'ausgabe' 
+            WHERE r.typ = 'ausgabe'
+            AND r.bezahlt = 1
+            AND r.buchungsnummer IS NOT NULL
             AND (r.buchungsart IS NULL OR r.buchungsart IN ('inland', 'drittland'))
             AND $datumFilter";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $vorsteuerRechnungen = $stmt->fetch()['vorsteuer'] ?? 0;
-    
+
     // Einfuhr-USt Drittland separat (KZ 061)
     $sql = "SELECT SUM(r.ust_betrag) as vorsteuer
             FROM rechnungen r
-            WHERE r.typ = 'ausgabe' 
+            WHERE r.typ = 'ausgabe'
+            AND r.bezahlt = 1
+            AND r.buchungsnummer IS NOT NULL
             AND r.buchungsart = 'drittland'
             AND $datumFilter";
     $stmt = $db->prepare($sql);
     $stmt->execute($params);
     $vorsteuerDrittland = $stmt->fetch()['vorsteuer'] ?? 0;
     $u30['kz061'] = $vorsteuerDrittland;
-    
+
     // Innergemeinschaftliche Erwerbe (igE) - Buchungsart 'eu_ige'
     $sql = "SELECT SUM(r.netto_betrag) as netto
             FROM rechnungen r
-            WHERE r.typ = 'ausgabe' 
+            WHERE r.typ = 'ausgabe'
+            AND r.bezahlt = 1
+            AND r.buchungsnummer IS NOT NULL
             AND r.buchungsart = 'eu_ige'
             AND $datumFilter";
     $stmt = $db->prepare($sql);
@@ -508,11 +592,11 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     $igeNetto = $stmt->fetch()['netto'] ?? 0;
     
     if ($igeNetto > 0) {
-        // igE: Bemessungsgrundlage (Netto aus EU-Einkäufen)
+        // igE: Bemessungsgrundlage gesamt (Netto aus EU-Einkäufen)
         $u30['kz070'] = $igeNetto;
-        // igE: Erwerbsteuer 20% (diese wird geschuldet) - KZ 072
-        $u30['kz072'] = $igeNetto * 0.20;
-        // igE: Gleichzeitig Vorsteuer daraus (gleicht sich aus) - KZ 065
+        // igE: davon zum Normalsatz 20% steuerpflichtig (= KZ070, wenn alle igE zum 20%-Satz)
+        $u30['kz072'] = $igeNetto;
+        // igE: Vorsteuer aus igE (Erwerbsteuer KZ072 × 20%, gleicht sich aus) - KZ 065
         $u30['kz065'] = $igeNetto * 0.20;
     }
     
@@ -530,8 +614,8 @@ function berechneUstVoranmeldung($jahr, $monat, $typ = 'monat') {
     // Vorsteuer gesamt (ohne igE-Vorsteuer, die separat in kz065 steht)
     $u30['kz060'] = $vorsteuerRechnungen - $vorsteuerDrittland + $vorsteuerAnlagen;
     
-    // Zahllast berechnen: Summe aller Steuerbeträge - Vorsteuer
-    $ustGesamt = $u30['kz029'] + $u30['kz027'] + $u30['kz052'] + $u30['kz072'];
+    // Zahllast berechnen: kz072 = Bemessungsgrundlage → Erwerbsteuer = kz072 × 20%
+    $ustGesamt = $u30['kz029'] + $u30['kz027'] + $u30['kz052'] + ($u30['kz072'] * 0.20);
     $vorsteuerGesamt = $u30['kz060'] + $u30['kz061'] + $u30['kz065'] + $u30['kz066'];
     $u30['zahllast'] = $ustGesamt - $vorsteuerGesamt;
     $u30['kz095'] = $u30['zahllast'];
@@ -627,11 +711,11 @@ function berechneEinkommensteuer($jahr) {
         }
     }
     
-    // Einnahmen nach Kategorie - ALLE Kennzahlen
+    // Einnahmen nach Kategorie - ALLE Kennzahlen (Ist-Besteuerung: Zahlungsdatum ist maßgeblich)
     $sql = "SELECT k.e1a_kennzahl, COALESCE(SUM(r.netto_betrag), 0) as summe
             FROM rechnungen r
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
-            WHERE r.typ = 'einnahme' AND YEAR(r.datum) = ?
+            WHERE r.typ = 'einnahme' AND r.bezahlt = 1 AND r.buchungsnummer IS NOT NULL AND YEAR(r.bezahlt_am) = ?
             GROUP BY k.e1a_kennzahl";
     $stmt = $db->prepare($sql);
     $stmt->execute([$jahr]);
@@ -652,7 +736,7 @@ function berechneEinkommensteuer($jahr) {
     $sql = "SELECT k.e1a_kennzahl, r.buchungsart, r.netto_betrag, r.ausland_ust_betrag
             FROM rechnungen r
             LEFT JOIN kategorien k ON r.kategorie_id = k.id
-            WHERE r.typ = 'ausgabe' AND YEAR(r.datum) = ?";
+            WHERE r.typ = 'ausgabe' AND r.bezahlt = 1 AND r.buchungsnummer IS NOT NULL AND YEAR(r.bezahlt_am) = ?";
     $stmt = $db->prepare($sql);
     $stmt->execute([$jahr]);
     foreach ($stmt->fetchAll() as $row) {

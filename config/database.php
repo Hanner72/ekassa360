@@ -4,10 +4,21 @@
  * Buchhaltungs-App für Österreich
  */
 
-define('DB_HOST', 'localhost');
-define('DB_NAME', 'ekassa360');
-define('DB_USER', 'root');
-define('DB_PASS', '');
+ini_set('default_charset', 'UTF-8');
+header('Content-Type: text/html; charset=UTF-8');
+
+// Umgebungsspezifische Zugangsdaten liegen in config/database.local.php (nicht in Git,
+// siehe .gitignore) - damit ein "git pull" auf dem Live-Server nie die dortigen echten
+// Zugangsdaten mit diesen lokalen Laragon-Standardwerten überschreibt. Existiert die Datei
+// nicht (z.B. frische lokale Installation), gelten die Laragon-Standardwerte unten.
+if (file_exists(__DIR__ . '/database.local.php')) {
+    require __DIR__ . '/database.local.php';
+} else {
+    define('DB_HOST', 'localhost');
+    define('DB_NAME', 'ekassa360');
+    define('DB_USER', 'root');
+    define('DB_PASS', '');
+}
 
 class Database {
     private static $instance = null;
@@ -45,4 +56,17 @@ class Database {
 // Hilfsfunktion für Datenbankzugriff
 function db() {
     return Database::getInstance()->getConnection();
+}
+
+// Automatischer Migrations-Runner: wendet neue database/add_*.sql-Dateien bei Bedarf an
+// (siehe includes/migrations.php) - läuft bei jedem Request, damit ein reiner Datei-Push
+// auf den Live-Server ohne manuellen DB-Schritt auskommt.
+//
+// SKIP_AUTO_MIGRATION (vor diesem require definieren) überspringt NUR den Auto-Lauf, lädt
+// aber weiterhin die Konstanten/Funktionen aus migrations.php sowie db() mit den echten,
+// bereits hier oben konfigurierten Zugangsdaten. Gedacht für Diagnose-/Reparatur-Werkzeuge
+// (siehe migration_bootstrap.php), damit dort NIE eigene Zugangsdaten-Kopien nötig sind.
+require_once __DIR__ . '/../includes/migrations.php';
+if (!defined('SKIP_AUTO_MIGRATION')) {
+    fuehreAusstehendeMigrationenAus();
 }

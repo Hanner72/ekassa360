@@ -1,5 +1,12 @@
 <?php
 $currentPage = basename($_SERVER['PHP_SELF'], '.php');
+
+// Eigene require_once hier (statt sich auf die jeweils einbindende Seite zu verlassen), damit
+// die Badges unabhängig davon funktionieren, welche der ~19 Seiten diese Sidebar einbindet.
+require_once __DIR__ . '/nachrichten_functions.php';
+require_once __DIR__ . '/aufgaben_functions.php';
+$sidebarUngeleseneNachrichten = getUngeleseneNachrichtenAnzahl($_SESSION['benutzer_id']);
+$sidebarOffeneAufgaben = getOffeneAufgabenAnzahl($_SESSION['benutzer_id']);
 ?>
 <nav id="sidebarMenu" class="col-md-3 col-lg-2 d-md-block bg-light sidebar collapse">
     <div class="position-sticky pt-3 sidebar-sticky">
@@ -12,7 +19,65 @@ $currentPage = basename($_SERVER['PHP_SELF'], '.php');
             </li>
             <li class="nav-item">
                 <a class="nav-link <?= $currentPage == 'rechnungen' ? 'active' : '' ?>" href="rechnungen.php">
-                    <i class="bi bi-receipt me-2"></i>Rechnungen
+                    <i class="bi bi-receipt me-2"></i>Kassabuch
+                </a>
+            </li>
+        </ul>
+
+        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted text-uppercase">
+            <span>Team</span>
+        </h6>
+        <ul class="nav flex-column mb-2">
+            <li class="nav-item">
+                <a class="nav-link d-flex justify-content-between align-items-center <?= $currentPage == 'nachrichten' ? 'active' : '' ?>" href="nachrichten.php">
+                    <span><i class="bi bi-chat-dots me-2"></i>Nachrichten</span>
+                    <?php if ($sidebarUngeleseneNachrichten > 0): ?>
+                    <span class="badge bg-danger rounded-pill"><?= $sidebarUngeleseneNachrichten ?></span>
+                    <?php endif; ?>
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link d-flex justify-content-between align-items-center <?= $currentPage == 'aufgaben' ? 'active' : '' ?>" href="aufgaben.php">
+                    <span><i class="bi bi-check2-square me-2"></i>Aufgaben</span>
+                    <?php if ($sidebarOffeneAufgaben > 0): ?>
+                    <span class="badge bg-primary rounded-pill"><?= $sidebarOffeneAufgaben ?></span>
+                    <?php endif; ?>
+                </a>
+            </li>
+        </ul>
+
+        <h6 class="sidebar-heading d-flex justify-content-between align-items-center px-3 mt-4 mb-1 text-muted text-uppercase">
+            <span>Verkauf</span>
+        </h6>
+        <ul class="nav flex-column mb-2">
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'kunden' ? 'active' : '' ?>" href="kunden.php">
+                    <i class="bi bi-person-vcard me-2"></i>Kunden
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'artikel' ? 'active' : '' ?>" href="artikel.php">
+                    <i class="bi bi-box-seam me-2"></i>Artikel
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'angebote' ? 'active' : '' ?>" href="angebote.php">
+                    <i class="bi bi-file-earmark-text me-2"></i>Angebote
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'auftraege' ? 'active' : '' ?>" href="auftraege.php">
+                    <i class="bi bi-clipboard-check me-2"></i>Aufträge
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'verkaufsrechnungen' ? 'active' : '' ?>" href="verkaufsrechnungen.php">
+                    <i class="bi bi-receipt-cutoff me-2"></i>Verkaufsrechnungen
+                </a>
+            </li>
+            <li class="nav-item">
+                <a class="nav-link <?= $currentPage == 'wiederkehrende_rechnungen' ? 'active' : '' ?>" href="wiederkehrende_rechnungen.php">
+                    <i class="bi bi-arrow-repeat me-2"></i>Wiederkehrende Rechnungen
                 </a>
             </li>
         </ul>

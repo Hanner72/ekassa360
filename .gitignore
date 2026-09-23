@@ -1,1 +1,15 @@
 *.zip
+
+# Verkauf-Modul: sensible paperless-ngx-Zugangsdaten und lokal generierte PDFs
+config/paperless.php
+storage/
+
+# Verkauf-Modul: sensible SMTP-Zugangsdaten für den E-Mail-Versand
+config/mail.php
+
+# Umgebungsspezifische DB-Zugangsdaten (siehe config/database.php) - nie synchronisieren,
+# damit ein Deployment/git pull nie die Live-Zugangsdaten überschreibt
+config/database.local.php
+
+# Zugangsdaten für den (nicht mehr genutzten) SFTP/FTP-Upload - gehören nie ins Repo
+.vscode/sftp.json

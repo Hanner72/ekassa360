@@ -434,11 +434,11 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                                     </td>
                                 </tr>
                                 <tr>
-                                    <td>Erwerbsteuer 20% daraus</td>
+                                    <td>davon Normalsatz 20% steuerpflichtig</td>
                                     <td class="text-center"><strong>KZ 072</strong></td>
                                     <td>
-                                        <input type="number" step="0.01" class="form-control text-end bg-light" 
-                                               value="<?= number_format($u30['kz072'] ?? 0, 2, '.', '') ?>" readonly>
+                                        <input type="number" step="0.01" class="form-control text-end bg-light"
+                                               name="kz072" value="<?= number_format($u30['kz072'] ?? 0, 2, '.', '') ?>" readonly>
                                     </td>
                                 </tr>
                                 <tr class="table-success">
@@ -451,7 +451,7 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
                                 </tr>
                             </table>
                             <div class="alert alert-info mb-0">
-                                <small><strong>Ergebnis igE:</strong> Erwerbsteuer <?= formatBetrag($u30['kz072'] ?? 0) ?> − Vorsteuer <?= formatBetrag($u30['kz065']) ?> = <strong><?= formatBetrag(($u30['kz072'] ?? 0) - $u30['kz065']) ?></strong> (Nullsumme)</small>
+                                <small><strong>Ergebnis igE:</strong> Erwerbsteuer (KZ 072 × 20%) <?= formatBetrag(($u30['kz072'] ?? 0) * 0.20) ?> − Vorsteuer KZ 065 <?= formatBetrag($u30['kz065']) ?> = <strong>0,00 €</strong> (Nullsumme)</small>
                             </div>
                         </div>
                     </div>
@@ -504,7 +504,7 @@ $quartalsnamen = ['', 'Q1 (Jan-Mär)', 'Q2 (Apr-Jun)', 'Q3 (Jul-Sep)', 'Q4 (Okt-
 
                     <!-- Ergebnis -->
                     <?php 
-                    $ustGesamt = ($u30['kz029'] ?? 0) + ($u30['kz027'] ?? 0) + ($u30['kz052'] ?? 0) + ($u30['kz072'] ?? 0);
+                    $ustGesamt = ($u30['kz029'] ?? 0) + ($u30['kz027'] ?? 0) + ($u30['kz052'] ?? 0) + (($u30['kz072'] ?? 0) * 0.20);
                     $vorsteuerGesamt = ($u30['kz060'] ?? 0) + ($u30['kz061'] ?? 0) + ($u30['kz065'] ?? 0);
                     ?>
                     <div class="card mb-4 <?= ($u30['zahllast'] ?? 0) >= 0 ? 'border-danger' : 'border-success' ?>">

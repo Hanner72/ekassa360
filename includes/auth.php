@@ -56,7 +56,15 @@ function getCurrentUserName() {
  */
 function requireLogin() {
     if (!isLoggedIn()) {
-        $_SESSION['redirect_after_login'] = $_SERVER['REQUEST_URI'];
+        // Bewusst NICHT den vollen $_SERVER['REQUEST_URI'] speichern: der enthält je nach
+        // Server-/Vhost-Konfiguration einen Verzeichnis-Anteil (lokal z.B. "/ekassa360/...",
+        // auf einer eigenen Subdomain ohne Unterordner ggf. einen anderen), der nach dem
+        // Redirect zu login.php nicht mehr zum tatsächlichen Pfad passt. Alle Seiten liegen
+        // flach im selben Verzeichnis wie login.php, daher reicht Dateiname + Query-String -
+        // das ist unabhängig davon korrekt, unter welchem Pfad die App gerade läuft.
+        $seite = basename($_SERVER['PHP_SELF']);
+        $query = $_SERVER['QUERY_STRING'] ?? '';
+        $_SESSION['redirect_after_login'] = $seite . ($query !== '' ? '?' . $query : '');
         header('Location: login.php');
         exit;
     }
