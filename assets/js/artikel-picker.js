@@ -42,7 +42,7 @@
         return `<div class="artikel-picker position-relative">
             <input type="hidden" name="pos_artikel_id[]" value="${artikelId || ''}">
             <input type="text" class="form-control form-control-sm artikel-picker-such" placeholder="Artikel suchen..." autocomplete="off" value="${escapeHtmlPicker(wert)}">
-            <div class="list-group artikel-picker-liste position-fixed shadow-sm" style="z-index:1055; max-height:240px; overflow-y:auto; display:none;"></div>
+            <div class="list-group artikel-picker-liste position-fixed shadow-sm" tabindex="-1" style="z-index:1055; max-height:240px; overflow-y:auto; overscroll-behavior:contain; outline:none; display:none;"></div>
         </div>`;
     };
 
@@ -134,12 +134,18 @@
         zeigeListe(p, e.target.value);
     });
 
+    // Schließen erst, wenn der Fokus den Picker (Suchfeld + Liste) ganz verlässt. Klicks in die
+    // Liste - auch auf deren Scrollbar - geben den Fokus an die Liste (tabindex="-1") bzw. an
+    // einen Eintrag weiter und lassen sie damit offen. Die kurze Verzögerung deckt Browser ab,
+    // die beim Klick kein relatedTarget liefern (z.B. Safari bei Buttons).
     document.addEventListener('focusout', function (e) {
-        if (!e.target.matches('.artikel-picker-such')) return;
-        const p = picker(e.target);
-        // Kurze Verzögerung, damit ein Klick auf einen Listeneintrag (der sonst vor dem
-        // click-Event durch blur bereits verschwinden würde) noch registriert wird.
-        setTimeout(() => verstecke(p), 150);
+        const wrap = e.target.closest && e.target.closest('.artikel-picker');
+        if (!wrap) return;
+        if (e.relatedTarget && wrap.contains(e.relatedTarget)) return;
+        const p = picker(wrap.querySelector('.artikel-picker-such'));
+        setTimeout(() => {
+            if (!wrap.contains(document.activeElement)) verstecke(p);
+        }, 150);
     });
 
     document.addEventListener('mousedown', function (e) {
@@ -178,13 +184,13 @@
         }
     });
 
-    // Mausklick irgendwo in die Trefferliste (auch auf deren Scrollbar) darf dem Suchfeld
-    // nicht den Fokus nehmen - sonst würde focusout die Liste schließen, bevor man scrollen
-    // kann. Die Auswahl eines Eintrags passiert oben im separaten mousedown-Handler.
+    // Klick außerhalb eines Pickers schließt alle offenen Listen (auch falls der Browser dabei
+    // kein focusout auslöst).
     document.addEventListener('mousedown', function (e) {
-        if (e.target.closest('.artikel-picker-liste')) {
-            e.preventDefault();
-        }
+        if (e.target.closest('.artikel-picker')) return;
+        document.querySelectorAll('.artikel-picker-liste').forEach(liste => {
+            liste.style.display = 'none';
+        });
     });
 
     // Bei Scrollen der Seite/Tabelle oder Fenster-Resize (z.B. Bildschirmtastatur am Handy)
