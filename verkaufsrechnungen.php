@@ -626,7 +626,7 @@ $pageTitle = 'Verkaufsrechnungen';
     </div>
 
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
-    <script src="assets/js/artikel-picker.js"></script>
+    <script src="assets/js/artikel-picker.js?v=<?= filemtime(__DIR__ . '/assets/js/artikel-picker.js') ?>"></script>
     <script>
         // Schlägt "Fällig am" anhand der gewählten Zahlungsbedingung vor (tage_bis_faellig ab
         // Rechnungsdatum) - bleibt manuell änderbar, wird nur bei Änderung von Datum/Zahlungs-

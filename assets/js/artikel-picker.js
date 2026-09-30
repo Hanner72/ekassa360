@@ -178,15 +178,28 @@
         }
     });
 
-    // Bei Scrollen (z.B. horizontales Scrollen der .table-responsive-Tabelle) oder
-    // Fenster-Resize passt sich die fixed-positionierte Liste nicht automatisch an -
-    // einfach schließen statt an falscher Stelle "kleben" zu lassen. `true` (Capture-Phase)
-    // ist nötig, damit auch Scroll-Events von inneren, nicht bubbelnden Containern ankommen.
-    function versteckeAlleOffenenListen() {
+    // Mausklick irgendwo in die Trefferliste (auch auf deren Scrollbar) darf dem Suchfeld
+    // nicht den Fokus nehmen - sonst würde focusout die Liste schließen, bevor man scrollen
+    // kann. Die Auswahl eines Eintrags passiert oben im separaten mousedown-Handler.
+    document.addEventListener('mousedown', function (e) {
+        if (e.target.closest('.artikel-picker-liste')) {
+            e.preventDefault();
+        }
+    });
+
+    // Bei Scrollen der Seite/Tabelle oder Fenster-Resize (z.B. Bildschirmtastatur am Handy)
+    // passt sich die fixed-positionierte Liste nicht automatisch an - daher neu ausrichten.
+    // Scroll-Events aus der Liste selbst werden ignoriert, sonst wäre sie nicht scrollbar.
+    // `true` (Capture-Phase) ist nötig, damit auch Scroll-Events von inneren, nicht
+    // bubbelnden Containern ankommen.
+    function positioniereOffeneListen(e) {
+        if (e && e.target instanceof Element && e.target.closest('.artikel-picker-liste')) return;
         document.querySelectorAll('.artikel-picker-liste').forEach(liste => {
-            liste.style.display = 'none';
+            if (liste.style.display === 'none') return;
+            const suchInput = liste.closest('.artikel-picker').querySelector('.artikel-picker-such');
+            positioniereListe(picker(suchInput));
         });
     }
-    document.addEventListener('scroll', versteckeAlleOffenenListen, true);
-    window.addEventListener('resize', versteckeAlleOffenenListen);
+    document.addEventListener('scroll', positioniereOffeneListen, true);
+    window.addEventListener('resize', positioniereOffeneListen);
 })();
