@@ -515,6 +515,29 @@ function streamPaperlessDocument($documentId) {
 }
 
 /**
+ * Wie streamPaperlessDocument(), aber gibt die rohen Bytes zurück statt sie direkt in die
+ * Response zu schreiben - für Aufrufer, die das Dokument weiterverarbeiten (z.B. in ein ZIP
+ * packen) statt es dem Browser auszuliefern.
+ */
+function holePaperlessDocumentBytes($documentId) {
+    if (!paperlessConfigured()) {
+        return ['success' => false, 'bytes' => null, 'error' => 'paperless-Integration nicht konfiguriert.'];
+    }
+
+    $einstellungen = getPaperlessEinstellungen();
+    $url = rtrim($einstellungen['base_url'], '/') . '/api/documents/' . intval($documentId) . '/download/';
+    $headers = ['Authorization: Token ' . $einstellungen['api_token']];
+
+    $result = paperlessHttpTransport('GET', $url, $headers, null, 30);
+
+    if ($result['body'] === false || $result['status'] < 200 || $result['status'] >= 300) {
+        return ['success' => false, 'bytes' => null, 'error' => $result['error'] ?: ('HTTP ' . $result['status'])];
+    }
+
+    return ['success' => true, 'bytes' => $result['body'], 'error' => null];
+}
+
+/**
  * Ausgehende Archivierung: rendert das Verkaufsdokument-PDF, speichert es lokal
  * unter storage/verkauf_pdfs/, lädt es nach paperless-ngx hoch und schreibt
  * pdf_pfad/paperless_document_id zurück. Ein Fehlschlag wird zurückgegeben,

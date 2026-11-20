@@ -473,6 +473,9 @@ $rechnungen = getRechnungen($filters);
                 <div class="d-flex justify-content-between flex-wrap flex-md-nowrap align-items-center pt-3 pb-2 mb-3 border-bottom">
                     <h1 class="h2"><i class="bi bi-receipt me-2"></i>Kassabuch</h1>
                     <div class="btn-toolbar mb-2 mb-md-0">
+                        <button type="button" class="btn btn-outline-primary me-2" data-bs-toggle="modal" data-bs-target="#journalExportModal">
+                            <i class="bi bi-file-earmark-zip me-1"></i>Journal-Export
+                        </button>
                         <a href="rechnungen.php?action=new&typ=einnahme" class="btn btn-success me-2">
                             <i class="bi bi-plus-circle me-1"></i>Einnahme
                         </a>
@@ -708,8 +711,97 @@ $rechnungen = getRechnungen($filters);
         </div>
     </div>
 
+    <!-- Journal-Export Modal -->
+    <div class="modal fade" id="journalExportModal" tabindex="-1">
+        <div class="modal-dialog">
+            <div class="modal-content">
+                <form method="POST" action="kassabuch_export.php">
+                    <div class="modal-header">
+                        <h5 class="modal-title"><i class="bi bi-file-earmark-zip me-2"></i>Journal-Export</h5>
+                        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+                    </div>
+                    <div class="modal-body">
+                        <p class="text-muted small">
+                            Exportiert alle <strong>nummerierten</strong> Buchungen des gewählten Zeitraums als ZIP-Datei:
+                            eine Journal-Tabelle (Excel) sowie einen PDF-Beleg je Buchung, benannt nach
+                            <code>Buchungsnr-Rechnungsnr-Kunde/Lieferant.pdf</code>.
+                        </p>
+                        <div class="mb-3">
+                            <label class="form-label">Zeitraum</label>
+                            <div class="btn-group w-100" role="group">
+                                <input type="radio" class="btn-check" name="export_modus" id="export_modus_jahr" value="jahr" checked onchange="journalExportModusGeaendert()">
+                                <label class="btn btn-outline-primary" for="export_modus_jahr">Jahr</label>
+
+                                <input type="radio" class="btn-check" name="export_modus" id="export_modus_quartal" value="quartal" onchange="journalExportModusGeaendert()">
+                                <label class="btn btn-outline-primary" for="export_modus_quartal">Quartal</label>
+
+                                <input type="radio" class="btn-check" name="export_modus" id="export_modus_datum" value="datum" onchange="journalExportModusGeaendert()">
+                                <label class="btn btn-outline-primary" for="export_modus_datum">Datumsbereich</label>
+                            </div>
+                        </div>
+
+                        <div id="export_feld_jahr" class="row g-2 mb-3">
+                            <div class="col">
+                                <label class="form-label small text-muted mb-1">Jahr</label>
+                                <select name="export_jahr" class="form-select">
+                                    <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
+                                    <option value="<?= $y ?>"><?= $y ?></option>
+                                    <?php endfor; ?>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div id="export_feld_quartal" class="row g-2 mb-3 d-none">
+                            <div class="col">
+                                <label class="form-label small text-muted mb-1">Jahr</label>
+                                <select name="export_jahr" class="form-select">
+                                    <?php for ($y = date('Y'); $y >= date('Y') - 5; $y--): ?>
+                                    <option value="<?= $y ?>"><?= $y ?></option>
+                                    <?php endfor; ?>
+                                </select>
+                            </div>
+                            <div class="col">
+                                <label class="form-label small text-muted mb-1">Quartal</label>
+                                <select name="export_quartal" class="form-select">
+                                    <option value="1">Q1 (Jan–Mär)</option>
+                                    <option value="2">Q2 (Apr–Jun)</option>
+                                    <option value="3">Q3 (Jul–Sep)</option>
+                                    <option value="4">Q4 (Okt–Dez)</option>
+                                </select>
+                            </div>
+                        </div>
+
+                        <div id="export_feld_datum" class="row g-2 mb-3 d-none">
+                            <div class="col">
+                                <label class="form-label small text-muted mb-1">Von</label>
+                                <input type="date" name="export_datum_von" class="form-control" value="<?= date('Y') ?>-01-01">
+                            </div>
+                            <div class="col">
+                                <label class="form-label small text-muted mb-1">Bis</label>
+                                <input type="date" name="export_datum_bis" class="form-control" value="<?= date('Y-m-d') ?>">
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Abbrechen</button>
+                        <button type="submit" class="btn btn-primary">
+                            <i class="bi bi-download me-1"></i>Exportieren
+                        </button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        function journalExportModusGeaendert() {
+            const modus = document.querySelector('input[name="export_modus"]:checked').value;
+            document.getElementById('export_feld_jahr').classList.toggle('d-none', modus !== 'jahr');
+            document.getElementById('export_feld_quartal').classList.toggle('d-none', modus !== 'quartal');
+            document.getElementById('export_feld_datum').classList.toggle('d-none', modus !== 'datum');
+        }
+
         // Brutto berechnen
         function berechnebrutto() {
             const netto = parseFloat(document.getElementById('netto_betrag').value.replace(',', '.')) || 0;

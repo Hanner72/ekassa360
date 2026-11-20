@@ -10,6 +10,25 @@ if (session_status() === PHP_SESSION_NONE) {
 }
 
 /**
+ * Alle Buchungen für den Journal-Export (Kassabuch) in einem Datumsbereich - nur Buchungen
+ * MIT Buchungsnummer (siehe CLAUDE.md: ohne Buchungsnummer fließt eine Buchung auch nicht in
+ * U30/E1a ein, ein "Journal" für die Betriebsprüfung soll nur die tatsächlich fortlaufend
+ * nummerierten Buchungen enthalten). Chronologisch nach Buchungsnummer, nicht wie getRechnungen()
+ * absteigend - ein Journal wird in Buchungsreihenfolge gelesen.
+ */
+function getRechnungenFuerJournalExport($datumVon, $datumBis) {
+    $db = db();
+    $stmt = $db->prepare("SELECT r.*, k.name as kategorie_name, u.bezeichnung as ust_name, u.satz as ust_prozent
+                          FROM rechnungen r
+                          LEFT JOIN kategorien k ON r.kategorie_id = k.id
+                          LEFT JOIN ust_saetze u ON r.ust_satz_id = u.id
+                          WHERE r.datum BETWEEN ? AND ? AND r.buchungsnummer IS NOT NULL
+                          ORDER BY r.buchungsnummer ASC");
+    $stmt->execute([$datumVon, $datumBis]);
+    return $stmt->fetchAll();
+}
+
+/**
  * Flash Message setzen
  */
 function setFlashMessage($type, $message) {

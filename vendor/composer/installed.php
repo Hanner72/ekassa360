@@ -1,13 +1,13 @@
 <?php return array(
     'root' => array(
         'name' => 'ekassa360/buchhaltung',
-        'pretty_version' => '1.1.0.x-dev',
-        'version' => '1.1.0.9999999-dev',
-        'reference' => '554d8bfb02e60a61dd4a4d2194b8264ef8921b56',
+        'pretty_version' => '1.1.5.x-dev',
+        'version' => '1.1.5.9999999-dev',
+        'reference' => 'b95305f38d15fb28a6e5edb9ab5843058cc0df4d',
         'type' => 'project',
         'install_path' => __DIR__ . '/../../',
         'aliases' => array(),
-        'dev' => true,
+        'dev' => false,
     ),
     'versions' => array(
         'composer/pcre' => array(
@@ -47,9 +47,9 @@
             'dev_requirement' => false,
         ),
         'ekassa360/buchhaltung' => array(
-            'pretty_version' => '1.1.0.x-dev',
-            'version' => '1.1.0.9999999-dev',
-            'reference' => '554d8bfb02e60a61dd4a4d2194b8264ef8921b56',
+            'pretty_version' => '1.1.5.x-dev',
+            'version' => '1.1.5.9999999-dev',
+            'reference' => 'b95305f38d15fb28a6e5edb9ab5843058cc0df4d',
             'type' => 'project',
             'install_path' => __DIR__ . '/../../',
             'aliases' => array(),
