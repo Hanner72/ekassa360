@@ -605,13 +605,14 @@ $rechnungen = getRechnungen($filters);
                                         <th class="text-end">USt</th>
                                         <th class="text-end">Brutto</th>
                                         <th>Zahlung</th>
+                                        <th class="text-center">Beleg</th>
                                         <th class="text-end">Aktionen</th>
                                     </tr>
                                 </thead>
                                 <tbody>
                                     <?php if (empty($rechnungen)): ?>
                                     <tr>
-                                        <td colspan="11" class="text-center text-muted py-4">
+                                        <td colspan="12" class="text-center text-muted py-4">
                                             Keine Rechnungen gefunden
                                         </td>
                                     </tr>
@@ -663,6 +664,21 @@ $rechnungen = getRechnungen($filters);
                                                 <small class="text-muted"><i class="bi bi-bank2 me-1"></i>Überweisung</small>
                                             <?php endif; ?>
                                         </td>
+                                        <td class="text-center">
+                                            <?php if (!empty($r['paperless_document_id'])): ?>
+                                            <a href="paperless_proxy.php?id=<?= (int)$r['paperless_document_id'] ?>" target="_blank"
+                                               class="badge bg-success text-decoration-none" title="Beleg #<?= (int)$r['paperless_document_id'] ?> in paperless-ngx ansehen">
+                                                <i class="bi bi-paperclip"></i>
+                                            </a>
+                                            <?php elseif (!empty($r['verkaufsdokument_id'])): ?>
+                                            <a href="pdf_verkaufsdokument.php?id=<?= (int)$r['verkaufsdokument_id'] ?>" target="_blank"
+                                               class="badge bg-success text-decoration-none" title="PDF des verknüpften Verkaufsdokuments ansehen">
+                                                <i class="bi bi-file-earmark-pdf"></i>
+                                            </a>
+                                            <?php else: ?>
+                                            <span class="badge bg-secondary" title="Kein Beleg verknüpft"><i class="bi bi-dash"></i></span>
+                                            <?php endif; ?>
+                                        </td>
                                         <td class="text-end">
                                             <?php if (!$r['bezahlt'] && !empty($r['verkaufsdokument_id'])): ?>
                                             <form method="POST" class="d-inline">
@@ -688,17 +704,17 @@ $rechnungen = getRechnungen($filters);
                                     <tr class="table-light fw-bold">
                                         <td colspan="8" class="text-end">Summe Einnahmen:</td>
                                         <td class="text-end text-success"><?= formatBetrag($summeEinnahmen) ?></td>
-                                        <td colspan="2"></td>
+                                        <td colspan="3"></td>
                                     </tr>
                                     <tr class="table-light fw-bold">
                                         <td colspan="8" class="text-end">Summe Ausgaben:</td>
                                         <td class="text-end text-danger"><?= formatBetrag($summeAusgaben) ?></td>
-                                        <td colspan="2"></td>
+                                        <td colspan="3"></td>
                                     </tr>
                                     <tr class="table-primary fw-bold">
                                         <td colspan="8" class="text-end">Saldo:</td>
                                         <td class="text-end"><?= formatBetrag($summeEinnahmen - $summeAusgaben) ?></td>
-                                        <td colspan="2"></td>
+                                        <td colspan="3"></td>
                                     </tr>
                                     <?php endif; ?>
                                 </tbody>
